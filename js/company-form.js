@@ -9,6 +9,7 @@ let companyEditTarget = null;
 let companyScheduleEdited = false;
 let companySaving = false;
 const COMPANY_STEPS = ['basic', 'schedule', 'docs'];
+const AGENCY_BRANCHES = ['경남서부지사', '경남지사', '부산지역본부', '부산남부지사', '울산지사'];
 const OPTIONAL_COMPANY_FIELDS = [
   'newOwner', 'newCoach', 'newContactName', 'newContactTitle',
   'newContactPhone', 'newContactEmail', 'newEmployeeCount', 'newWorkplaceNumber',
@@ -83,6 +84,18 @@ function populateCompanyChoices() {
   const coaches = [...state.M.coaches].sort((a, b) => a.name.localeCompare(b.name, 'ko'));
   $('#newCoach').innerHTML = '<option value="">미배정</option>' +
     coaches.map(coach => `<option value="${esc(coach.name)}">${esc(coach.name)}</option>`).join('');
+  $('#newAgencyBranch').innerHTML = '<option value="">선택하세요</option>' +
+    AGENCY_BRANCHES.map(name => `<option value="${esc(name)}">${esc(name)}</option>`).join('');
+}
+function setChoiceValue(select, value) {
+  const next = String(value || '').trim();
+  if (next && ![...select.options].some(option => option.value === next)) {
+    const option = document.createElement('option');
+    option.value = next;
+    option.textContent = `${next} · 기존값`;
+    select.appendChild(option);
+  }
+  select.value = next;
 }
 function syncVisitControls(index, markEdited) {
   const checked = $(`#newConsult${index}Visit`).checked;
@@ -92,6 +105,7 @@ function syncVisitControls(index, markEdited) {
   if (checked && !owner.value && $('#newOwner').value) owner.value = $('#newOwner').value;
   hint.textContent = checked ? '동행할 내부 담당자를 선택하세요.' : '동행 체크 시 선택할 수 있습니다.';
   hint.classList.toggle('ready', checked);
+  if (typeof syncSearchableSelects === 'function') syncSearchableSelects(owner);
   if (markEdited) companyScheduleEdited = true;
   updateCompanyFormProgress();
 }
@@ -246,6 +260,7 @@ function openCompanyDialog() {
   syncTeamEnd();
   setCompanyFormStep('basic');
   updateCompanyFormProgress();
+  if (typeof syncSearchableSelects === 'function') syncSearchableSelects(COMPANY_FORM);
   setCompanyState(`${getBaseYear()}년 기준 · 날짜는 6/22 처럼 월/일만 적으면 됩니다.`, 'ok');
   COMPANY_DIALOG.classList.add('open');
   COMPANY_DIALOG.setAttribute('aria-hidden', 'false');
@@ -270,7 +285,7 @@ function openCompanyEditDialog(company) {
   $('#newEmployeeCount').value = workplace.employeeCount || '';
   $('#newWorkplaceNumber').value = workplace.managementNumber || '';
   $('#newCompanyAddress').value = workplace.address || '';
-  $('#newAgencyBranch').value = workplace.agencyBranch || '';
+  setChoiceValue($('#newAgencyBranch'), workplace.agencyBranch);
   $('#newHrd4uId').value = workplace.hrd4uId || '';
   fillConsultationFields(company);
   fillCompanyDocFields(company);
@@ -288,6 +303,7 @@ function openCompanyEditDialog(company) {
   $('#companyDocs').open = true;
   setCompanyFormStep('basic');
   updateCompanyFormProgress();
+  if (typeof syncSearchableSelects === 'function') syncSearchableSelects(COMPANY_FORM);
   COMPANY_FORM.querySelectorAll('.bad').forEach(box => box.classList.remove('bad'));
   setCompanyState(`${company.name} 정보를 수정합니다. 날짜는 6/22처럼 월/일로 입력하세요.`, 'ok');
   COMPANY_DIALOG.classList.add('open');

@@ -179,7 +179,7 @@ main{max-width:1560px;margin:0 auto;padding:20px 22px 64px}
 /* ---------- 툴바 / 필터 ---------- */
 .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
 .toolbar .spacer{margin-left:auto}
-input[type=search],input[type=text],input[type=date],input[type=time],input[type=email],input[type=tel],select,textarea{
+input[type=search],input[type=text],input[type=number],input[type=date],input[type=time],input[type=email],input[type=tel],select,textarea{
   font:inherit;color:var(--ink-1);background:var(--raised);
   border:1px solid var(--border);border-radius:7px;padding:7px 10px;
 }
@@ -684,7 +684,7 @@ main{max-width:1480px;padding:28px 24px 76px}
   gap:9px;margin-bottom:14px;padding:9px;border:1px solid var(--border);border-radius:14px;
   background:var(--surface);box-shadow:0 1px 2px rgba(19,34,56,.025);
 }
-input[type=search],input[type=text],input[type=date],input[type=time],input[type=email],input[type=tel],select,textarea{
+input[type=search],input[type=text],input[type=number],input[type=date],input[type=time],input[type=email],input[type=tel],select,textarea{
   min-height:36px;border-radius:10px;padding:8px 11px;background:var(--raised);
   transition:border-color .15s ease,box-shadow .15s ease,background .15s ease;
 }
@@ -820,6 +820,45 @@ tbody tr.sel td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
 }
 .company-field label b{color:var(--critical)}
 .company-field input,.company-field select{width:100%}
+.searchable-select{position:relative;min-width:150px}
+.company-field .searchable-select,.field .searchable-select{width:100%;min-width:0}
+.searchable-select-native{
+  position:absolute!important;width:1px!important;height:1px!important;min-height:0!important;
+  margin:0!important;padding:0!important;opacity:0!important;pointer-events:none!important;
+  clip:rect(0 0 0 0);overflow:hidden;
+}
+.searchable-select-input{
+  width:100%;min-width:0!important;padding-right:34px!important;cursor:pointer;
+  background-image:
+    linear-gradient(45deg,transparent 50%,var(--ink-3) 50%),
+    linear-gradient(135deg,var(--ink-3) 50%,transparent 50%);
+  background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;
+  background-size:5px 5px,5px 5px;background-repeat:no-repeat;
+}
+.searchable-select.open .searchable-select-input{cursor:text;background-image:none}
+.searchable-select.disabled .searchable-select-input{
+  background-color:var(--grid);color:var(--ink-3);cursor:not-allowed;
+}
+.searchable-select-panel{
+  position:absolute;z-index:260;top:calc(100% + 6px);left:0;
+  width:max-content;min-width:100%;max-width:min(360px,calc(100vw - 24px));max-height:250px;
+  padding:5px;overflow:auto;overscroll-behavior:contain;
+  border:1px solid var(--border);border-radius:11px;background:var(--surface);
+  box-shadow:0 16px 38px rgba(5,13,25,.2);
+}
+.searchable-select-panel[hidden]{display:none}
+.searchable-select.drop-up .searchable-select-panel{top:auto;bottom:calc(100% + 6px)}
+.searchable-select.align-end .searchable-select-panel{right:0;left:auto}
+.searchable-select-option{
+  display:block;width:100%;min-height:38px;padding:8px 10px;border:0;border-radius:7px;
+  background:transparent;color:var(--ink-1);font:inherit;font-size:12.5px;text-align:left;
+  white-space:nowrap;cursor:pointer;
+}
+.searchable-select-option:hover,.searchable-select-option.active{
+  background:var(--wash);color:var(--accent-ink);
+}
+.searchable-select-option[aria-selected="true"]{font-weight:750}
+.searchable-select-empty{padding:13px 10px;color:var(--ink-3);font-size:12px;text-align:center}
 .consult-sessions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px 15px}
 .consult-session{padding:13px;border:1px solid var(--grid);border-radius:12px;background:var(--raised)}
 .consult-session-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px}
@@ -979,8 +1018,12 @@ tbody tr.sel td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
   .toolbar .spacer{display:none}
   .active-filter-badge{flex-basis:100%;max-width:none;justify-content:space-between}
   .toolbar .btn,.toolbar select,.toolbar label.inline{min-height:44px}
+  .toolbar .searchable-select-input{min-height:44px}
   .toolbar label.inline{justify-content:center;padding:0 9px;border:1px solid var(--border);border-radius:10px;background:var(--raised)}
   input[type=search]{width:100%;min-width:100%}
+  .searchable-select{width:100%;min-width:0}
+  .searchable-select-panel{max-height:min(46vh,280px)}
+  .searchable-select-option{min-height:44px;padding:10px 11px;font-size:13px}
   .tablewrap::before{
     content:"↔ 좌우로 밀어 더 보기";display:block;position:sticky;left:0;z-index:9;
     width:max-content;padding:7px 10px;color:var(--ink-3);font-size:10.5px;
@@ -1060,7 +1103,7 @@ tbody tr.sel td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
 }
 
 @media print{
-  .topbar,.tabs,.toolbar,.drawer,.drawer-backdrop,.sync-dialog,.company-dialog,#drop,#toast{display:none!important}
+  .topbar,.tabs,.toolbar,.drawer,.drawer-backdrop,.sync-dialog,.company-dialog,.searchable-select-panel,#drop,#toast{display:none!important}
   body{background:#fff}
   main{padding:0}
   .card,.kpi,.tablewrap{box-shadow:none;break-inside:avoid}

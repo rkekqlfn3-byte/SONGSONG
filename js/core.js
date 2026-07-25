@@ -488,6 +488,7 @@ function render() {
   const f = { dash: viewDash, comp: viewCompanies, coach: viewCoaches, docs: viewDocs, mail: viewMail }[state.tab];
   VIEW.innerHTML = '';
   VIEW.appendChild(f());
+  if (typeof enhanceSearchableSelects === 'function') enhanceSearchableSelects(VIEW);
 
   if (wasSearching) {
     const inp = VIEW.querySelector('[data-role="search"]');

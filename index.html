@@ -166,7 +166,14 @@
               </div>
               <div class="company-field">
                 <label for="newAgencyBranch">공단지사</label>
-                <input id="newAgencyBranch" type="text" placeholder="예: 경남지사">
+                <select id="newAgencyBranch">
+                  <option value="">선택하세요</option>
+                  <option value="경남서부지사">경남서부지사</option>
+                  <option value="경남지사">경남지사</option>
+                  <option value="부산지역본부">부산지역본부</option>
+                  <option value="부산남부지사">부산남부지사</option>
+                  <option value="울산지사">울산지사</option>
+                </select>
               </div>
               <div class="company-field">
                 <label for="newHrd4uId">HRD4U ID</label>
@@ -284,6 +291,7 @@
 
 <script src="js/data.js"></script>
 <script src="js/core.js"></script>
+<script src="js/searchable-select.js"></script>
 <script src="js/views.js"></script>
 <script src="js/documents.js"></script>
 <script src="js/mail.js"></script>
