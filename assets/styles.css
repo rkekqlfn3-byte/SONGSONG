@@ -819,6 +819,13 @@ tbody tr.sel td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
   display:block;margin:0 0 5px;color:var(--ink-2);font-size:10.5px;font-weight:700;
 }
 .company-field label b{color:var(--critical)}
+.field-label-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 5px}
+.company-field .field-label-row label{margin:0}
+.field-auto-button{
+  min-height:25px;padding:2px 7px;border:1px solid var(--border);border-radius:7px;
+  background:var(--raised);color:var(--accent-ink);font-size:9.5px;font-weight:750;cursor:pointer;
+}
+.field-auto-button:hover{border-color:var(--accent);background:var(--wash)}
 .company-field input,.company-field select{width:100%}
 .searchable-select{position:relative;min-width:150px}
 .company-field .searchable-select,.field .searchable-select{width:100%;min-width:0}
@@ -870,6 +877,8 @@ tbody tr.sel td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
 .consult-session-fields .visit-owner{grid-column:1 / -1}
 .field-hint{display:block;margin:5px 1px 0;color:var(--ink-3);font-size:9.5px;line-height:1.4}
 .field-hint.ready{color:var(--accent-ink)}
+.field-hint.manual{color:var(--ink-2)}
+.field-hint.warn{color:var(--warning)}
 .consult-schedule-note{margin:10px 1px 0;color:var(--ink-3);font-size:10.5px}
 .consult-legacy-visit{display:none;margin-top:9px;padding:8px 10px;border-radius:8px;background:var(--wash);color:var(--accent-ink);font-size:10.5px}
 .consult-legacy-visit.show{display:block}
@@ -1080,6 +1089,7 @@ tbody tr.sel td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
   .company-fields,.company-fields.three{grid-template-columns:1fr}
   .consult-sessions{grid-template-columns:1fr}
   .company-field.full{grid-column:auto}
+  .field-auto-button{min-height:34px;padding:5px 9px;font-size:10.5px}
   .coach-contact-tools{align-items:flex-start;flex-direction:column;gap:6px}
   .company-actions{
     display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;

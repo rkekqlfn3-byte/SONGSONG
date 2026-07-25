@@ -95,6 +95,10 @@
     $(`[data-company-step="${COMPANY_STEPS[next]}"]`, COMPANY_FORM).focus();
   };
   $('#newCoach').onchange = () => updateCoachContact({ resetOverride: true, useMaster: true });
+  $('#newCompanyAddress').addEventListener('input', queueAgencyBranchSuggestion);
+  $('#newCompanyAddress').addEventListener('blur', () => applyAgencyBranchSuggestion(false));
+  $('#newAgencyBranch').addEventListener('change', markAgencyBranchManual);
+  $('#agencyBranchSuggest').onclick = () => applyAgencyBranchSuggestion(true);
   $('#coachContactOverride').onchange = () => {
     updateCoachContact({ useMaster: !$('#coachContactOverride').checked });
     if ($('#coachContactOverride').checked) $('#newCoachEmail').focus();
@@ -153,4 +157,3 @@
   const endpoint = localStorage.getItem(SHEET_ENDPOINT_KEY) || DEFAULT_SHEET_URL;
   syncFromSheet(endpoint, { silent: true, saveEndpoint: true });
 })();
-

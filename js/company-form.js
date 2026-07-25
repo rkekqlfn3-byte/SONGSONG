@@ -8,8 +8,10 @@ let companyReturnFocus = null;
 let companyEditTarget = null;
 let companyScheduleEdited = false;
 let companySaving = false;
+let agencyBranchManuallySelected = false;
+let agencyBranchAutoValue = '';
+let agencySuggestionTimer = 0;
 const COMPANY_STEPS = ['basic', 'schedule', 'docs'];
-const AGENCY_BRANCHES = ['경남서부지사', '경남지사', '부산지역본부', '부산남부지사', '울산지사'];
 const OPTIONAL_COMPANY_FIELDS = [
   'newOwner', 'newCoach', 'newContactName', 'newContactTitle',
   'newContactPhone', 'newContactEmail', 'newEmployeeCount', 'newWorkplaceNumber',
@@ -96,6 +98,81 @@ function setChoiceValue(select, value) {
     select.appendChild(option);
   }
   select.value = next;
+}
+function setAgencyBranchHint(message, tone) {
+  const hint = $('#agencyBranchHint');
+  hint.textContent = message;
+  hint.className = 'field-hint' + (tone ? ` ${tone}` : '');
+}
+function syncAgencyBranchField() {
+  if (typeof syncSearchableSelects === 'function') syncSearchableSelects($('#newAgencyBranch'));
+  updateCompanyFormProgress();
+}
+function applyAgencyBranchSuggestion(force) {
+  clearTimeout(agencySuggestionTimer);
+  const branch = $('#newAgencyBranch');
+  const address = $('#newCompanyAddress').value.trim();
+  if (force) agencyBranchManuallySelected = false;
+
+  if (agencyBranchManuallySelected && !force) {
+    setAgencyBranchHint(
+      branch.value
+        ? `${branch.value} 직접 선택됨 · 주소로 다시 찾으려면 ‘주소로 찾기’를 누르세요.`
+        : '공단지사를 직접 비워두었습니다 · 자동 추천은 ‘주소로 찾기’를 누르세요.',
+      'manual'
+    );
+    return null;
+  }
+
+  const suggestion = suggestAgencyBranch(address);
+  if (suggestion) {
+    setChoiceValue(branch, suggestion.branch);
+    agencyBranchAutoValue = suggestion.branch;
+    agencyBranchManuallySelected = false;
+    syncAgencyBranchField();
+    setAgencyBranchHint(`${suggestion.area} 주소 기준으로 ${suggestion.branch}를 선택했습니다.`, 'ready');
+    return suggestion;
+  }
+
+  if (agencyBranchAutoValue && branch.value === agencyBranchAutoValue) branch.value = '';
+  agencyBranchAutoValue = '';
+  syncAgencyBranchField();
+  setAgencyBranchHint(
+    address
+      ? '주소에서 관할 지사를 확인하지 못했습니다. 직접 선택하거나 ‘주소로 찾기’를 다시 눌러주세요.'
+      : '주소를 입력하면 관할 지사를 자동으로 추천합니다.',
+    address ? 'warn' : ''
+  );
+  return null;
+}
+function queueAgencyBranchSuggestion() {
+  clearTimeout(agencySuggestionTimer);
+  agencySuggestionTimer = setTimeout(() => applyAgencyBranchSuggestion(false), 240);
+}
+function resetAgencyBranchAutomation(company) {
+  clearTimeout(agencySuggestionTimer);
+  const branch = $('#newAgencyBranch');
+  const existing = String(branch.value || '').trim();
+  agencyBranchAutoValue = '';
+  agencyBranchManuallySelected = !!company && !!existing;
+  if (agencyBranchManuallySelected) {
+    setAgencyBranchHint(`${existing} 저장값을 유지합니다. 주소 기준으로 바꾸려면 ‘주소로 찾기’를 누르세요.`, 'manual');
+  } else if ($('#newCompanyAddress').value.trim()) {
+    applyAgencyBranchSuggestion(false);
+  } else {
+    setAgencyBranchHint('주소를 입력하면 관할 지사를 자동으로 추천합니다.', '');
+  }
+}
+function markAgencyBranchManual() {
+  agencyBranchManuallySelected = true;
+  agencyBranchAutoValue = '';
+  const value = $('#newAgencyBranch').value;
+  setAgencyBranchHint(
+    value
+      ? `${value} 직접 선택됨 · 주소가 바뀌어도 자동으로 덮어쓰지 않습니다.`
+      : '공단지사를 직접 비워두었습니다 · 자동 추천은 ‘주소로 찾기’를 누르세요.',
+    'manual'
+  );
 }
 function syncVisitControls(index, markEdited) {
   const checked = $(`#newConsult${index}Visit`).checked;
@@ -260,6 +337,7 @@ function openCompanyDialog() {
   syncTeamEnd();
   setCompanyFormStep('basic');
   updateCompanyFormProgress();
+  resetAgencyBranchAutomation(null);
   if (typeof syncSearchableSelects === 'function') syncSearchableSelects(COMPANY_FORM);
   setCompanyState(`${getBaseYear()}년 기준 · 날짜는 6/22 처럼 월/일만 적으면 됩니다.`, 'ok');
   COMPANY_DIALOG.classList.add('open');
@@ -303,6 +381,7 @@ function openCompanyEditDialog(company) {
   $('#companyDocs').open = true;
   setCompanyFormStep('basic');
   updateCompanyFormProgress();
+  resetAgencyBranchAutomation(company);
   if (typeof syncSearchableSelects === 'function') syncSearchableSelects(COMPANY_FORM);
   COMPANY_FORM.querySelectorAll('.bad').forEach(box => box.classList.remove('bad'));
   setCompanyState(`${company.name} 정보를 수정합니다. 날짜는 6/22처럼 월/일로 입력하세요.`, 'ok');
