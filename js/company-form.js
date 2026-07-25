@@ -11,7 +11,9 @@ let companySaving = false;
 const COMPANY_STEPS = ['basic', 'schedule', 'docs'];
 const OPTIONAL_COMPANY_FIELDS = [
   'newOwner', 'newCoach', 'newContactName', 'newContactTitle',
-  'newContactPhone', 'newContactEmail', 'newConsult1Date', 'newConsult2Date',
+  'newContactPhone', 'newContactEmail', 'newEmployeeCount', 'newWorkplaceNumber',
+  'newCompanyAddress', 'newAgencyBranch', 'newHrd4uId',
+  'newConsult1Date', 'newConsult2Date',
 ];
 
 function setCompanyState(message, tone) {
@@ -264,6 +266,12 @@ function openCompanyEditDialog(company) {
   $('#newContactTitle').value = company.contact.title;
   $('#newContactPhone').value = company.contact.phone;
   $('#newContactEmail').value = company.contact.email;
+  const workplace = company.workplace || {};
+  $('#newEmployeeCount').value = workplace.employeeCount || '';
+  $('#newWorkplaceNumber').value = workplace.managementNumber || '';
+  $('#newCompanyAddress').value = workplace.address || '';
+  $('#newAgencyBranch').value = workplace.agencyBranch || '';
+  $('#newHrd4uId').value = workplace.hrd4uId || '';
   fillConsultationFields(company);
   fillCompanyDocFields(company);
   const coach = state.M.coaches.find(c => c.name === company.coachName);
@@ -422,6 +430,11 @@ async function saveCompany() {
     contactTitle: $('#newContactTitle').value.trim(),
     contactPhone: $('#newContactPhone').value.trim(),
     contactEmail: $('#newContactEmail').value.trim(),
+    employeeCount: $('#newEmployeeCount').value.trim(),
+    workplaceNumber: $('#newWorkplaceNumber').value.trim(),
+    companyAddress: $('#newCompanyAddress').value.trim(),
+    agencyBranch: $('#newAgencyBranch').value.trim(),
+    hrd4uId: $('#newHrd4uId').value.trim(),
     startDate,
     endDate,
     coachName: $('#newCoach').value,
@@ -464,4 +477,3 @@ async function saveCompany() {
     setCompanyBusy(false);
   }
 }
-

@@ -150,6 +150,31 @@
             </div>
           </section>
           <section class="company-section">
+            <h3>사업장 정보</h3>
+            <div class="company-fields">
+              <div class="company-field">
+                <label for="newEmployeeCount">근로자 수</label>
+                <input id="newEmployeeCount" type="number" min="0" step="1" inputmode="numeric" placeholder="예: 30">
+              </div>
+              <div class="company-field">
+                <label for="newWorkplaceNumber">사업장 관리번호</label>
+                <input id="newWorkplaceNumber" type="text" inputmode="numeric" autocomplete="off" placeholder="예: 12345678901">
+              </div>
+              <div class="company-field full">
+                <label for="newCompanyAddress">주소</label>
+                <input id="newCompanyAddress" type="text" autocomplete="street-address" placeholder="사업장 주소">
+              </div>
+              <div class="company-field">
+                <label for="newAgencyBranch">공단지사</label>
+                <input id="newAgencyBranch" type="text" placeholder="예: 경남지사">
+              </div>
+              <div class="company-field">
+                <label for="newHrd4uId">HRD4U ID</label>
+                <input id="newHrd4uId" type="text" autocomplete="off" spellcheck="false" placeholder="HRD4U 아이디">
+              </div>
+            </div>
+          </section>
+          <section class="company-section">
             <h3>코치 연락처</h3>
             <div class="company-fields">
               <div class="company-field">
@@ -240,7 +265,7 @@
       <div class="company-actions">
         <button class="btn" type="button" id="companyCancel">취소</button>
         <div class="company-progress required-missing" id="companyProgress" aria-live="polite">
-          <strong>필수 0/2</strong><span class="sep" aria-hidden="true"></span><span>선택 8개 비어 있음</span>
+          <strong>필수 0/2</strong><span class="sep" aria-hidden="true"></span><span>선택 13개 비어 있음</span>
         </div>
         <div class="spacer"></div>
         <button class="btn" type="button" id="companyOpenSettings">저장 연결 설정</button>

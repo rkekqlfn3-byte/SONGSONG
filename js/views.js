@@ -344,7 +344,11 @@ function csvDownload(name, rows) {
    7. 기업 탭
    ============================================================ */
 const COMP_SEARCH_FIELDS = c =>
-  [c.name, c.contact.name, c.contact.email, c.contact.phone, c.coachName, c.owner, c.status];
+  [
+    c.name, c.contact.name, c.contact.email, c.contact.phone,
+    ...Object.values(c.workplace || {}),
+    c.coachName, c.owner, c.status,
+  ];
 
 function filteredCompanies() {
   const s = state.comp;
@@ -392,11 +396,15 @@ function viewCompanies() {
   bar.appendChild(add);
   const exp = el('button', 'btn', 'CSV 내보내기');
   exp.onclick = () => csvDownload('기업목록.csv', [
-    ['진행현황', '담당자', '기업명', '기업담당자', '직급', '전화', '이메일',
+    ['진행현황', '담당자', '기업명', '근로자수', '사업장 관리번호', '주소', '공단지사', 'HRD4U ID',
+      '기업담당자', '직급', '전화', '이메일',
       '1차 컨설팅일', '1차 시간', '1차 동행', '1차 동행 담당자',
       '2차 컨설팅일', '2차 시간', '2차 동행', '2차 동행 담당자',
       '원 종료기한', '2주연장', '적용 종료기한', 'D-day', '코치', '코치이메일', '서류제출'],
-    ...rows.map(c => [c.status, c.owner, c.name, c.contact.name, c.contact.title, c.contact.phone, c.contact.email,
+    ...rows.map(c => [c.status, c.owner, c.name,
+      (c.workplace || {}).employeeCount, (c.workplace || {}).managementNumber,
+      (c.workplace || {}).address, (c.workplace || {}).agencyBranch, (c.workplace || {}).hrd4uId,
+      c.contact.name, c.contact.title, c.contact.phone, c.contact.email,
       c.consultations[0].date ? iso(c.consultations[0].date) : (c.consultations[0].dateRaw || (c.start ? iso(c.start) : c.startRaw)),
       c.consultations[0].time, c.consultations[0].visit ? 'O' : '', c.consultations[0].owner,
       c.consultations[1].date ? iso(c.consultations[1].date) : c.consultations[1].dateRaw,
@@ -561,4 +569,3 @@ function viewCoaches() {
   refreshList();
   return box;
 }
-

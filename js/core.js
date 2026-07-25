@@ -228,6 +228,11 @@ const SRC_DASHBOARD = {
 };
 
 const SOURCE_EXTRA_HEADERS = {
+  employeeCount: '근로자수',
+  workplaceNumber: '사업장 관리번호',
+  companyAddress: '주소',
+  agencyBranch: '공단지사',
+  hrd4uId: 'HRD4U ID',
   visitOwner: '담당',
   visitDate: '일자',
   visitTime: '시간',
@@ -391,6 +396,13 @@ function normalize(raw) {
         name: cell(r, 'contactName'), title: cell(r, 'contactTitle'),
         phone: cell(r, 'contactPhone'), email: cell(r, 'contactEmail'),
       },
+      workplace: {
+        employeeCount: cell(r, 'employeeCount'),
+        managementNumber: cell(r, 'workplaceNumber'),
+        address: cell(r, 'companyAddress'),
+        agencyBranch: cell(r, 'agencyBranch'),
+        hrd4uId: cell(r, 'hrd4uId'),
+      },
       startRaw: cell(r, 'start'), endRaw: cell(r, 'end'),
       consultations: [
         {
@@ -514,4 +526,3 @@ function meter(n, total) {
   const pct = Math.round(n / total * 100);
   return `<div class="meter"><div class="t"><div class="f" style="width:${pct}%"></div></div><div class="n">${n}/${total}</div></div>`;
 }
-

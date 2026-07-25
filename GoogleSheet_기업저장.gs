@@ -25,7 +25,7 @@
  *   ?action=updateCoachDocs&payload=... 코치 공통 서식8·9·10·통장사본 수정
  */
 
-const VERSION = '2026-07-25i';
+const VERSION = '2026-07-26j';
 
 const SPREADSHEET_ID = '1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q';
 const SOURCE_SHEET = 'AI훈련로드맵';
@@ -65,6 +65,15 @@ const SOURCE_FIRST_ROW = 3;
 const SOURCE_HEADER_ROW = 2;
 const COACH_FIRST_ROW = 3;
 const DOCUMENT_FIRST_ROW = 4;
+
+/** 기업 원본 탭에 추가되는 사업장 기본정보 열. 같은 헤더가 이미 있으면 그 열을 그대로 사용한다. */
+const COMPANY_INFO_COLUMNS = [
+  { key: 'employeeCount',    header: '근로자수',        type: 'number' },
+  { key: 'workplaceNumber',  header: '사업장 관리번호', type: 'text' },
+  { key: 'companyAddress',   header: '주소',            type: 'text' },
+  { key: 'agencyBranch',     header: '공단지사',        type: 'text' },
+  { key: 'hrd4uId',          header: 'HRD4U ID',        type: 'text' }
+];
 
 /** 기업 원본 탭에 추가되는 1·2차 컨설팅 일정 열. 기존 열은 건드리지 않고 마지막 열 뒤에 붙인다. */
 const CONSULTATION_COLUMNS = [
@@ -245,7 +254,9 @@ function sourceColumns_(sheet) {
       visitDate: '일자',
       visitTime: '시간'
     };
-    CONSULTATION_COLUMNS.forEach(function (def) { extraHeaders[def.key] = def.header; });
+    COMPANY_INFO_COLUMNS.concat(CONSULTATION_COLUMNS).forEach(function (def) {
+      extraHeaders[def.key] = def.header;
+    });
     Object.keys(extraHeaders).forEach(function (key) {
       const index = sourceHeader.indexOf(extraHeaders[key]);
       if (index >= 0) columns[key] = index + 1;
@@ -254,12 +265,12 @@ function sourceColumns_(sheet) {
   return columns;
 }
 
-/** 1·2차 일정 열이 없으면 원본 마지막 열 뒤에 안전하게 추가한다. */
-function ensureConsultationColumns_(sheet) {
+/** 요청된 확장 열이 없으면 원본 마지막 열 뒤에 안전하게 추가한다. */
+function ensureSourceExtraColumns_(sheet, definitions, groupTitle) {
   const width = Math.max(1, sheet.getLastColumn());
   const headers = sheet.getRange(SOURCE_HEADER_ROW, 1, 1, width).getDisplayValues()[0]
     .map(function (v) { return String(v || '').trim(); });
-  const missing = CONSULTATION_COLUMNS.filter(function (def) { return headers.indexOf(def.header) < 0; });
+  const missing = definitions.filter(function (def) { return headers.indexOf(def.header) < 0; });
   if (!missing.length) return;
 
   const requiredLastColumn = width + missing.length;
@@ -268,10 +279,39 @@ function ensureConsultationColumns_(sheet) {
   }
   let nextColumn = width + 1;
   missing.forEach(function (def, index) {
-    if (index === 0) sheet.getRange(1, nextColumn).setValue('1·2차 컨설팅 일정');
+    if (index === 0) sheet.getRange(1, nextColumn).setValue(groupTitle);
     sheet.getRange(SOURCE_HEADER_ROW, nextColumn).setValue(def.header);
     nextColumn++;
   });
+}
+
+function ensureCompanyInfoColumns_(sheet) {
+  ensureSourceExtraColumns_(sheet, COMPANY_INFO_COLUMNS, '사업장 정보');
+}
+
+function ensureConsultationColumns_(sheet) {
+  ensureSourceExtraColumns_(sheet, CONSULTATION_COLUMNS, '1·2차 컨설팅 일정');
+}
+
+function employeeCount_(value) {
+  const raw = String(value == null ? '' : value).trim();
+  if (!raw) return '';
+  if (!/^\d+$/.test(raw)) throw new Error('근로자 수는 0 이상의 정수로 입력해주세요.');
+  const count = Number(raw);
+  if (!isFinite(count) || count > 9007199254740991) {
+    throw new Error('근로자 수가 너무 큽니다.');
+  }
+  return count;
+}
+
+function companyInfoValues_(data) {
+  return {
+    employeeCount: employeeCount_(data.employeeCount),
+    workplaceNumber: cleanText_(data.workplaceNumber),
+    companyAddress: cleanText_(data.companyAddress),
+    agencyBranch: cleanText_(data.agencyBranch),
+    hrd4uId: cleanText_(data.hrd4uId)
+  };
 }
 
 function consultationValues_(data) {
@@ -346,9 +386,11 @@ function addCompany_(data) {
     const source = book.getSheetByName(SOURCE_SHEET);
     if (!source) throw new Error(SOURCE_SHEET + ' 탭을 찾을 수 없습니다.');
     const scheduleChanged = data.scheduleChanged === true || String(data.scheduleChanged).toLowerCase() === 'true';
+    ensureCompanyInfoColumns_(source);
     if (scheduleChanged) ensureConsultationColumns_(source);
     const columns = sourceColumns_(source);
     const schedule = scheduleChanged ? consultationValues_(data) : null;
+    const companyInfo = companyInfoValues_(data);
 
     const lastRow = source.getLastRow();
     if (lastRow >= SOURCE_FIRST_ROW) {
@@ -373,6 +415,9 @@ function addCompany_(data) {
     row[columns.contactTitle - 1] = cleanText_(data.contactTitle);
     row[columns.contactPhone - 1] = cleanText_(data.contactPhone);
     row[columns.contactEmail - 1] = cleanText_(data.contactEmail);
+    Object.keys(companyInfo).forEach(function (key) {
+      row[columns[key] - 1] = companyInfo[key];
+    });
     if (schedule) setConsultationRowValues_(row, columns, schedule);
 
     const insertedRow = appendStyledRow_(source, row);
@@ -403,9 +448,11 @@ function updateCompany_(data) {
     if (!source) throw new Error(SOURCE_SHEET + ' 탭을 찾을 수 없습니다.');
     const hasScheduleFlag = Object.prototype.hasOwnProperty.call(data, 'scheduleChanged');
     const scheduleChanged = data.scheduleChanged === true || String(data.scheduleChanged).toLowerCase() === 'true';
+    ensureCompanyInfoColumns_(source);
     if (scheduleChanged) ensureConsultationColumns_(source);
     const columns = sourceColumns_(source);
     const schedule = scheduleChanged ? consultationValues_(data) : null;
+    const companyInfo = companyInfoValues_(data);
 
     const lastRow = source.getLastRow();
     if (lastRow < SOURCE_FIRST_ROW) throw new Error('수정할 기업 데이터를 찾지 못했습니다.');
@@ -434,6 +481,9 @@ function updateCompany_(data) {
       coachEmail: cleanText_(data.coachEmail),
       coachPhone: cleanText_(data.coachPhone)
     };
+    Object.keys(companyInfo).forEach(function (key) {
+      values[key] = companyInfo[key];
+    });
     if (!hasScheduleFlag || scheduleChanged) {
       values.startDate = parseDate_(data.startDate);
       values.endDate = parseDate_(data.endDate);

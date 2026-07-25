@@ -482,6 +482,7 @@ const copyLine = (v, label) => v
 function openCompany(c, docsEditMode) {
   docsEditMode = !!docsEditMode;
   state.comp.sel = c.name;
+  const workplace = c.workplace || {};
   const chk = STAGES.map(st => {
     const items = DOC_DEFS.filter(d => d.stage === st).map(d => {
       const has = filled(c.docs[d.k]);
@@ -536,6 +537,13 @@ function openCompany(c, docsEditMode) {
     : '';
 
   openDrawer(esc(c.name), `${badge(c.status)} <span class="dim">담당 ${esc(c.owner || '미배정')}</span>`, `
+    <div class="sect"><h4>사업장 정보</h4><dl class="kv">
+      <dt>근로자 수</dt><dd>${workplace.employeeCount ? `${esc(workplace.employeeCount)}명` : '<span class="dim">—</span>'}</dd>
+      <dt>관리번호</dt><dd>${copyLine(workplace.managementNumber, '사업장 관리번호')}</dd>
+      <dt>주소</dt><dd>${esc(workplace.address || '—')}</dd>
+      <dt>공단지사</dt><dd>${esc(workplace.agencyBranch || '—')}</dd>
+      <dt>HRD4U ID</dt><dd>${copyLine(workplace.hrd4uId, 'HRD4U ID')}</dd>
+    </dl></div>
     <div class="sect"><h4>기업 담당자</h4><dl class="kv">
       <dt>성명</dt><dd>${esc(c.contact.name || '—')} <span class="dim">${esc(c.contact.title)}</span></dd>
       <dt>연락처</dt><dd>${c.contact.phone.split('\n').map(p => copyLine(p.trim(), '연락처')).join('<br>')}</dd>
@@ -725,4 +733,3 @@ function openCoach(c, docsEditMode) {
     });
   });
 }
-
