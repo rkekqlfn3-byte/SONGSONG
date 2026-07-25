@@ -1,0 +1,265 @@
+/* ============================================================
+   12. 데이터 로드 / 갱신
+   ============================================================ */
+const LS_KEY = 'airoadmap-dashboard-v1';
+const SHEET_ENDPOINT_KEY = LS_KEY + ':sheetEndpoint';
+const WRITE_ENDPOINT_KEY = LS_KEY + ':writeEndpoint';
+const BASE_YEAR_KEY = LS_KEY + ':baseYear';
+const EXTENSION_KEY = LS_KEY + ':twoWeekExtensions';
+const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q/edit';
+const DEFAULT_WRITE_URL = 'https://script.google.com/macros/s/AKfycbxF5kDX3-LgfDWV2HmppfizLKD8TUajpsOL42LGLp-d58a5zTOTddp2mvlM4IZI8GJdqg/exec';
+
+/** 기업별 2주 연장 여부 — 시트 원본은 건드리지 않고 이 브라우저에 별도로 보관한다 */
+function readExtensions() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(EXTENSION_KEY) || '{}');
+    return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+  } catch { return {}; }
+}
+let twoWeekExtensions = readExtensions();
+function updateCompanyDeadline(company) {
+  company.extended = !!(company.end && twoWeekExtensions[company.name]);
+  company.effectiveEnd = company.end && company.extended ? addDays(company.end, 14) : company.end;
+  company.dday = ACTIVE.has(company.status) ? daysFromToday(company.effectiveEnd) : null;
+}
+function setCompanyExtension(company, enabled) {
+  if (!company.end) return;
+  if (enabled) twoWeekExtensions[company.name] = true;
+  else delete twoWeekExtensions[company.name];
+  try { localStorage.setItem(EXTENSION_KEY, JSON.stringify(twoWeekExtensions)); }
+  catch { toast('2주 연장 상태를 저장하지 못했습니다. 이번 화면에만 적용됩니다.'); }
+  updateCompanyDeadline(company);
+}
+
+/** 서류·일정 입력에 붙는 기준 연도 — 상단에서 한 번 정하면 계속 유지된다 */
+function getBaseYear() {
+  const saved = parseInt(localStorage.getItem(BASE_YEAR_KEY), 10);
+  return (saved >= 2000 && saved <= 2100) ? saved : TODAY.getFullYear();
+}
+function setBaseYear(year) { localStorage.setItem(BASE_YEAR_KEY, String(year)); }
+/** 저장용 주소 — 설정에서 바꾸지 않았으면 배포된 기본 주소를 쓴다 */
+const writeEndpoint = () => localStorage.getItem(WRITE_ENDPOINT_KEY) || DEFAULT_WRITE_URL;
+/** 읽어오는 탭. headers=0으로 요청하므로 배열 인덱스 = 시트 행 번호 - 1 이 된다 */
+const GVIZ_SHEETS = [TAB_DOCS, TAB_SOURCE, TAB_COACH, TAB_MAIL];
+
+function applyData(raw, srcLabel, persist) {
+  const M = normalize(raw);               // 실패하면 예외 → 호출부에서 기존 데이터 유지
+  state.M = M; state.src = srcLabel;
+  $('#stampDate').textContent = raw.generatedAt || iso(TODAY);
+  $('#stampSrc').textContent = srcLabel;
+  if (persist) {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(raw)); }
+    catch { toast('브라우저 저장 용량을 초과해 이번 세션에만 적용됩니다.'); }
+  }
+  render();
+}
+
+function normalizeEndpoint(value) {
+  const raw = String(value || '').trim();
+  if (!raw) throw new Error('Google Sheet 주소를 입력하세요.');
+  const directId = raw.match(/^[A-Za-z0-9_-]{20,}$/);
+  const urlId = raw.match(/\/spreadsheets\/d\/([A-Za-z0-9_-]+)/);
+  const id = directId ? directId[0] : urlId && urlId[1];
+  if (!id) throw new Error('Google Sheet 공유 주소 또는 문서 ID를 확인하세요.');
+  return `https://docs.google.com/spreadsheets/d/${id}/edit`;
+}
+
+function normalizeWriteEndpoint(value) {
+  const raw = String(value || '').trim();
+  if (!raw) throw new Error('기업 저장용 Apps Script 주소를 입력하세요.');
+  let url;
+  try { url = new URL(raw); }
+  catch { throw new Error('기업 저장용 주소 형식이 올바르지 않습니다.'); }
+  if (url.protocol !== 'https:' || !/\.google\.com$/.test(url.hostname) || !/\/exec\/?$/.test(url.pathname)) {
+    throw new Error('/exec로 끝나는 Apps Script 웹 앱 주소를 확인하세요.');
+  }
+  return url.href;
+}
+
+function gvizCellValue(cell) {
+  if (!cell || cell.v == null) return '';
+  const value = cell.v;
+  if (typeof value === 'string') {
+    const date = value.match(/^Date\((\d+),(\d+),(\d+)/);
+    if (date) {
+      const serial = Date.UTC(+date[1], +date[2], +date[3]) / DAY + 25569;
+      return String(Math.round(serial));
+    }
+  }
+  if (typeof value === 'number' && value >= 0 && value < 1 && /^\d{1,2}:\d{2}/.test(String(cell.f || ''))) {
+    return String(cell.f);
+  }
+  return String(value);
+}
+
+/**
+ * 탭 하나를 원시 그리드로 읽는다.
+ * headers=0 을 반드시 붙인다 — 빼면 gviz가 헤더를 몇 줄로 볼지 스스로 추측해서
+ * 탭마다 행이 밀리고, 헤더가 데이터로 섞여 들어온다.
+ */
+function loadGvizSheet(spreadsheetId, name) {
+  const callback = `__sheetSync_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const url = new URL(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq`);
+  url.searchParams.set('sheet', name);
+  url.searchParams.set('headers', '0');
+  url.searchParams.set('tqx', `out:json;responseHandler:${callback}`);
+  url.searchParams.set('_', Date.now());
+  return new Promise((resolve, reject) => {
+    const script = el('script');
+    const clear = () => {
+      clearTimeout(timer);
+      script.remove();
+      try { delete window[callback]; } catch { window[callback] = undefined; }
+    };
+    const timer = setTimeout(() => {
+      clear();
+      reject(new Error(`${name} 탭 연결 시간이 초과되었습니다.`));
+    }, 20000);
+    window[callback] = response => {
+      clear();
+      if (!response || response.status !== 'ok' || !response.table) {
+        reject(new Error(`${name} 탭을 읽지 못했습니다. 탭 이름과 공유 설정을 확인하세요.`));
+        return;
+      }
+      const width = response.table.cols.length;
+      resolve(response.table.rows.map(row =>
+        Array.from({ length: width }, (_, i) => gvizCellValue(row.c && row.c[i]))
+      ));
+    };
+    script.onerror = () => {
+      clear();
+      reject(new Error(`${name} 탭에 연결하지 못했습니다. 링크 공유 설정을 확인하세요.`));
+    };
+    script.src = url.href;
+    document.head.appendChild(script);
+  });
+}
+
+async function fetchSheetData(endpoint) {
+  const clean = normalizeEndpoint(endpoint);
+  const spreadsheetId = clean.match(/\/spreadsheets\/d\/([A-Za-z0-9_-]+)/)[1];
+  const values = await Promise.all(GVIZ_SHEETS.map(name => loadGvizSheet(spreadsheetId, name)));
+  const sheets = {};
+  GVIZ_SHEETS.forEach((name, i) => { sheets[name] = values[i]; });
+  const raw = { generatedAt: iso(TODAY), sheets };
+  if (raw && raw.error) throw new Error(raw.error);
+  normalize(raw); // 화면을 바꾸기 전에 시트 구조부터 검증
+  return raw;
+}
+
+const SYNC_DIALOG = $('#syncDialog');
+const SYNC_ENDPOINT = $('#sheetEndpoint');
+const SYNC_WRITE_ENDPOINT = $('#sheetWriteEndpoint');
+const SYNC_STATE = $('#syncState');
+let syncReturnFocus = null;
+
+function setSyncState(message, tone) {
+  SYNC_STATE.textContent = message || '';
+  SYNC_STATE.className = 'sync-state' + (message ? ` show ${tone || ''}` : '');
+}
+function openSyncDialog() {
+  syncReturnFocus = document.activeElement;
+  SYNC_ENDPOINT.value = localStorage.getItem(SHEET_ENDPOINT_KEY) || DEFAULT_SHEET_URL;
+  SYNC_WRITE_ENDPOINT.value = writeEndpoint();
+  setSyncState('');
+  SYNC_DIALOG.classList.add('open');
+  SYNC_DIALOG.setAttribute('aria-hidden', 'false');
+  requestAnimationFrame(() => SYNC_ENDPOINT.focus());
+}
+function closeSyncDialog() {
+  const wasOpen = SYNC_DIALOG.classList.contains('open');
+  SYNC_DIALOG.classList.remove('open');
+  SYNC_DIALOG.setAttribute('aria-hidden', 'true');
+  if (wasOpen && syncReturnFocus && document.contains(syncReturnFocus)) syncReturnFocus.focus();
+}
+function setSyncBusy(busy) {
+  const main = $('#btnUpdate');
+  main.disabled = busy;
+  main.textContent = busy ? '동기화 중…' : '↻ 구글 시트 동기화';
+  $('#syncTest').disabled = busy;
+  $('#syncSave').disabled = busy;
+}
+async function syncFromSheet(endpoint, options) {
+  const opts = options || {};
+  let clean;
+  try { clean = normalizeEndpoint(endpoint); }
+  catch (e) {
+    if (opts.inDialog) setSyncState(e.message, 'bad'); else toast(e.message);
+    return false;
+  }
+  setSyncBusy(true);
+  if (opts.inDialog) setSyncState('Google Sheet에서 데이터를 확인하고 있습니다…', '');
+  try {
+    const raw = await fetchSheetData(clean);
+    if (opts.testOnly) {
+      setSyncState('연결 성공 — 필요한 시트 4개를 모두 확인했습니다.', 'ok');
+      return true;
+    }
+    if (opts.saveEndpoint) localStorage.setItem(SHEET_ENDPOINT_KEY, clean);
+    applyData(raw, 'Google Sheet · 자동 동기화', true);
+    if (!opts.silent) toast('Google Sheet 최신 데이터로 동기화했습니다.');
+    if (opts.inDialog) setSyncState('동기화 완료 — 연결 주소를 저장했습니다.', 'ok');
+    return true;
+  } catch (e) {
+    console.error(e);
+    const msg = '동기화 실패 — ' + (e.message || '데이터를 불러오지 못했습니다.');
+    if (opts.inDialog) setSyncState(msg, 'bad');
+    else if (!opts.silent) toast(msg + ' 기존 데이터 유지');
+    return false;
+  } finally {
+    setSyncBusy(false);
+  }
+}
+
+function requestSheetWrite(endpoint, action, payload) {
+  const clean = normalizeWriteEndpoint(endpoint);
+  const callback = `__sheetWrite_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const url = new URL(clean);
+  url.searchParams.set('action', action);
+  url.searchParams.set('payload', JSON.stringify(payload || {}));
+  url.searchParams.set('callback', callback);
+  url.searchParams.set('_', Date.now());
+  return new Promise((resolve, reject) => {
+    const script = el('script');
+    const clear = () => {
+      clearTimeout(timer);
+      script.remove();
+      try { delete window[callback]; } catch { window[callback] = undefined; }
+    };
+    const timer = setTimeout(() => {
+      clear();
+      reject(new Error('저장 요청 시간이 초과되었습니다.'));
+    }, 25000);
+    window[callback] = response => {
+      clear();
+      if (!response || response.ok !== true) {
+        reject(new Error((response && response.error) || '시트 저장에 실패했습니다.'));
+        return;
+      }
+      resolve(response);
+    };
+    script.onerror = () => {
+      clear();
+      reject(new Error('저장용 웹 앱에 연결하지 못했습니다.'));
+    };
+    script.src = url.href;
+    document.head.appendChild(script);
+  });
+}
+
+/** 비상용 수동 갱신 — 인터넷이 막혔을 때 내려받은 .xlsx로 화면을 채운다 */
+async function loadFile(file) {
+  if (!file) return;
+  if (!/\.xlsx$/i.test(file.name)) { toast('구글 시트에서 내려받은 .xlsx 파일을 넣어주세요.'); return; }
+  try {
+    if (typeof DecompressionStream === 'undefined') throw new Error('이 브라우저는 xlsx 해제를 지원하지 않습니다. Edge 또는 Chrome에서 열어주세요.');
+    const sheets = await readXlsx(file);
+    const raw = { generatedAt: iso(TODAY), sheets };
+    applyData(raw, `직접 갱신 · ${file.name}`, true);
+    toast('최신 데이터로 갱신했습니다.');
+  } catch (e) {
+    console.error(e);
+    toast('갱신 실패 — ' + (e.message || '파일을 읽을 수 없습니다') + ' (기존 데이터 유지)');
+  }
+}
+

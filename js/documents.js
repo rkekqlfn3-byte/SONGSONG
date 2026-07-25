@@ -1,0 +1,728 @@
+/* ============================================================
+   9. 서류 현황 매트릭스
+   ============================================================ */
+const DOC_SEARCH_FIELDS = c => [c.name, c.coachName, c.owner, c.status];
+
+function companyStageProgressInner(company) {
+  const segments = STAGES.map(stage => {
+    const defs = DOC_DEFS.filter(def => def.stage === stage);
+    const done = defs.filter(def => filled(company.docs[def.k])).length;
+    const pct = defs.length ? Math.round(done / defs.length * 100) : 0;
+    return `<span class="row-stage-segment" data-tip="${stage} ${done}/${defs.length}">` +
+      `<i style="width:${pct}%"></i></span>`;
+  }).join('');
+  return `<div class="matrix-company-line"><span class="strong" data-tip="${esc(company.name)}">${esc(company.name)}</span>` +
+    `<span class="row-doc-total">${company.docCount}/${DOC_DEFS.length}</span></div>` +
+    `<div class="row-stage-progress" aria-label="신청·확정·실시·지급 단계별 서류 진행률">${segments}</div>`;
+}
+function companyStageProgressHtml(company) {
+  return `<div class="matrix-company-cell" data-stage-company="${esc(company.name)}">${companyStageProgressInner(company)}</div>`;
+}
+
+function viewDocs() {
+  const s = state.docs;
+  const defs = DOC_DEFS.filter(d => !s.stage || d.stage === s.stage);
+  let list = state.M.companies.filter(c => matchesQuery(s.q, DOC_SEARCH_FIELDS(c)));
+  if (s.missingOnly) list = list.filter(c => defs.some(d => !filled(c.docs[d.k])));
+  const activeFilters = el('div', 'active-filter-badge');
+  const refreshFilterBadge = () => {
+    const labels = [];
+    if (s.q) labels.push(`검색 “${s.q}”`);
+    if (s.stage) labels.push(`${s.stage}단계`);
+    if (s.missingOnly) labels.push('미제출 기업');
+    paintActiveFilters(activeFilters, labels, () => {
+      Object.assign(s, { q: '', stage: '', missingOnly: false });
+      render();
+    });
+  };
+
+  const bar = toolbar([
+    search(s.q, '기업 · 코치 · 담당자 검색 (초성 가능)', v => {
+      s.q = v;
+      if (liveSearch) liveSearch(v); else render();
+      refreshFilterBadge();
+    }),
+    picker(s.stage, STAGES.map(v => ({ v, t: `${v}단계` })), v => { s.stage = v; render(); }, '전체 단계'),
+    (() => {
+      const l = el('label', 'inline');
+      l.innerHTML = `<input type="checkbox"${s.missingOnly ? ' checked' : ''}> 미제출 있는 기업만`;
+      l.querySelector('input').onchange = e => { s.missingOnly = e.target.checked; render(); };
+      return l;
+    })(),
+    activeFilters,
+  ]);
+  refreshFilterBadge();
+  bar.appendChild(el('div', 'spacer'));
+  const exp = el('button', 'btn', 'CSV 내보내기');
+  exp.onclick = () => csvDownload('서류현황.csv', [
+    ['진행현황', '담당자', '기업', '코치', ...defs.map(d => d.label)],
+    ...list.map(c => [c.status, c.owner, c.name, c.coachName, ...defs.map(d => cellText(c.docs[d.k]))]),
+  ]);
+  bar.appendChild(exp);
+
+  // 단계 그룹 헤더
+  let groupRow =
+    `<th class="stick-col stick-status matrix-status"></th>` +
+    `<th class="stick-col stick-company matrix-company"></th>` +
+    `<th class="stick-col stick-owner matrix-person"></th>` +
+    `<th class="stick-col stick-coach matrix-person"></th>`;
+  const shown = STAGES.filter(st => defs.some(d => d.stage === st));
+  shown.forEach((st, i) => {
+    const n = defs.filter(d => d.stage === st).length;
+    groupRow += `<th class="grp grp-1" colspan="${n}">${st}<span>${n}종</span></th>`;
+  });
+
+  const cols = [
+    { k: 'status', h: '진행현황', cls: 'stick-col stick-status matrix-status', sort: false, cell: c => badge(c.status) },
+    { k: 'name', h: '기업', sort: false, cls: 'stick-col stick-company matrix-company company-name', cell: companyStageProgressHtml },
+    { k: 'owner', h: '담당', sort: false, cls: 'stick-col stick-owner nowrap matrix-person', cell: c => esc(c.owner || '—') },
+    { k: 'coachName', h: '코치', sort: false, cls: 'stick-col stick-coach nowrap matrix-person', cell: c => esc(c.coachName || '—') },
+  ];
+  defs.forEach((d, i) => {
+    const first = i === 0 || defs[i - 1].stage !== d.stage;
+    cols.push({
+      k: d.k, sort: false,
+      h: `<span class="vert-in">${esc(d.short).replace(/\n/g, '<br>')}</span>`,
+      cls: 'cell' + (first ? ' grp-1' : ''),
+      cell: c => docCellHtml(c, d),
+    });
+  });
+  const tbl = table(cols, list.map(c => (c._key = c.name, c)), { cls: 'matrix', groupRow, onPick: openCompany });
+
+  // 셀 단위로 다시 그릴 수 있도록 현재 화면 구성을 기억해 둔다 (저장할 때 표 전체를 재구축하지 않으려고)
+  docsView = { list, defs, visible: list };
+  // 검색은 표를 다시 그리지 않고 행만 숨긴다 — 한글 조합이 끊기지 않는다
+  liveSearch = query => {
+    docsView.visible = filterRowsInPlace(tbl.querySelector('tbody'), list, query, DOC_SEARCH_FIELDS);
+    refreshDocsSummary();
+  };
+
+  // 헤더 세로 라벨 + 셀 상태·조작은 렌더 후 입힌다 (cell() 이 문자열만 반환하므로)
+  tbl.querySelectorAll('thead tr:last-child th').forEach((th, i) => {
+    if (i < 4) return;
+    th.classList.add('vert');
+    th.dataset.tip = defs[i - 4].label;
+  });
+  tbl.querySelectorAll('tbody tr').forEach((tr, ri) => {
+    const c = list[ri];
+    [...tr.children].forEach((td, ci) => {
+      if (ci < 4) return;
+      const d = defs[ci - 4];
+      td.dataset.company = c.name;
+      td.dataset.docKey = d.k;
+      td.classList.toggle('miss', !filled(c.docs[d.k]));
+      td.dataset.tip = docCellTip(c, d);
+      if (!docEditable(d)) { td.classList.add('locked'); return; }
+
+      td.classList.add('editable');
+      td.tabIndex = -1;
+      td.onclick = e => { e.stopPropagation(); openDocCell(td); };
+      td.onkeydown = e => {
+        if (docEditing) return;                 // 편집 중에는 칸이 아니라 입력칸이 키를 받는다
+        const step = DOC_ARROWS[e.key];
+        if (step) { e.preventDefault(); focusDocCell(moveDocCell(td, step[0], step[1])); return; }
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDocCell(td); }
+      };
+    });
+  });
+
+  const overview = el('div', 'docs-overview');
+  overview.innerHTML =
+    `<div class="docs-stat"><span>표시 기업</span><strong id="docsShown">${list.length}</strong></div>` +
+    `<div class="docs-stat good"><span>제출</span><strong id="docsDone">0</strong></div>` +
+    `<div class="docs-stat bad"><span>미제출</span><strong id="docsMiss">0</strong></div>` +
+    `<div class="docs-stat"><span>완료율</span><strong id="docsRate">0%</strong></div>` +
+    `<div class="docs-edit-hint">셀을 누르면 바로 수정 · <b>Enter</b> 아래칸 · <b>Tab</b> 옆칸 · <b>Esc</b> 취소</div>`;
+  const sum = el('div', 'count-note');
+  sum.id = 'docsSummary';
+
+  const box = el('div');
+  box.append(bar, overview, tbl, sum);
+  requestAnimationFrame(refreshDocsSummary);   // 통계는 DOM에 붙은 뒤 채운다
+  return box;
+}
+
+/* ------------------------------------------------------------
+   서류 칸 직접 편집
+
+   968칸(88개사 × 11종)을 손으로 채우는 작업이라 세 가지를 지킨다.
+   1) 저장할 때 표를 통째로 다시 그리지 않는다 — 바뀐 칸만 고쳐 그린다
+   2) 응답을 기다리지 않고 화면에 먼저 반영하고, 실패하면 되돌린다
+   3) Enter/Tab/화살표로 손이 마우스로 가지 않게 한다
+   ------------------------------------------------------------ */
+let docEditing = false;
+let docsView = { list: [], defs: [] };
+const docSaving = new Set();          // 저장 중인 칸 — 같은 칸에 요청이 겹치지 않게 잠근다
+const DOC_ARROWS = { ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowDown: [0, 1], ArrowUp: [0, -1] };
+
+const findCompany = name => state.M.companies.find(c => c.name === name);
+
+function docCellHtml(company, def) {
+  const value = company.docs[def.k];
+  if (!filled(value)) return '<span class="doc-cell-missing">—</span>';
+  return `<span class="doc-cell-value"><i>✓</i>${def.type === 'mark' ? '' : esc(docCellText(value))}</span>`;
+}
+function docCellTip(company, def) {
+  const shown = filled(company.docs[def.k]) ? docCellText(company.docs[def.k]) : '미제출';
+  if (!docEditable(def)) return `${company.name} — ${def.label}\n${shown}\n약정 시작일 +28일 자동 계산`;
+  return `${company.name} — ${def.label}\n${shown}\n` +
+    (def.byCoach ? `코치 ${company.coachName || '미배정'} 공통 · 담당 기업 전체에 반영됩니다\n` : '') +
+    `눌러서 ${def.type === 'mark' ? '제출 표시를 켜고 끕니다' : '월/일을 입력합니다'}`;
+}
+
+/** 표 전체가 아니라 해당 칸만 다시 그린다 */
+function paintDocCell(td, company, def) {
+  delete td.dataset.pending;
+  td.classList.remove('save-failed');
+  td.innerHTML = docCellHtml(company, def);
+  td.classList.toggle('miss', !filled(company.docs[def.k]));
+  td.dataset.tip = docCellTip(company, def);
+}
+/** 특정 기업·항목에 해당하는 칸을 화면에서 찾아 갱신 (코치 공통값은 여러 기업에 걸린다) */
+function repaintDocCells(companyNames, keys) {
+  const names = new Set(companyNames);
+  document.querySelectorAll('.matrix td[data-doc-key]').forEach(td => {
+    if (!names.has(td.dataset.company) || keys.indexOf(td.dataset.docKey) < 0) return;
+    const company = findCompany(td.dataset.company);
+    if (company) paintDocCell(td, company, byDocKey(td.dataset.docKey));
+  });
+  document.querySelectorAll('[data-stage-company]').forEach(host => {
+    if (!names.has(host.dataset.stageCompany)) return;
+    const company = findCompany(host.dataset.stageCompany);
+    if (company) host.innerHTML = companyStageProgressInner(company);
+  });
+  refreshDocsSummary();
+}
+function refreshDocsSummary() {
+  const defs = docsView.defs;
+  const list = docsView.visible || docsView.list;      // 검색으로 숨긴 행은 통계에서도 뺀다
+  if (!defs.length || !document.getElementById('docsDone')) return;
+  const total = list.length * defs.length;
+  const done = list.reduce((sum, c) => sum + defs.filter(d => filled(c.docs[d.k])).length, 0);
+  document.getElementById('docsShown').textContent = list.length;
+  document.getElementById('docsDone').textContent = done;
+  document.getElementById('docsMiss').textContent = Math.max(0, total - done);
+  document.getElementById('docsRate').textContent = (total ? Math.round(done / total * 100) : 0) + '%';
+  const box = document.getElementById('docsSummary');
+  if (box) {
+    if (!list.length) { box.textContent = '검색 결과가 없습니다.'; return; }
+    const miss = defs.map(d => ({ d, n: list.filter(c => !filled(c.docs[d.k])).length }))
+      .sort((a, b) => b.n - a.n).slice(0, 4);
+    box.textContent = `${list.length}개사 × 서류 ${defs.length}종 · 미제출 상위: ` +
+      miss.map(x => `${x.d.label} ${x.n}건`).join(' · ');
+  }
+}
+
+/** 화살표·Tab 이동. 자동 계산 칸은 건너뛴다 */
+function moveDocCell(td, dCol, dRow) {
+  let cur = td;
+  for (let guard = 0; guard < 40; guard++) {
+    const tr = cur.parentElement;
+    const ci = [...tr.children].indexOf(cur);
+    const rows = [...tr.parentElement.children];
+    const targetRow = rows[rows.indexOf(tr) + dRow];
+    if (!targetRow) return null;
+    const target = [...targetRow.children][ci + dCol];
+    if (!target || !target.dataset.docKey) return null;
+    if (target.classList.contains('locked')) { cur = target; continue; }
+    return target;
+  }
+  return null;
+}
+function focusDocCell(td) {
+  if (!td) return;
+  td.focus();
+  const def = byDocKey(td.dataset.docKey);
+  if (def && def.type !== 'mark') openDocCell(td);   // 날짜 칸은 이동하면 바로 입력 상태로
+}
+/** td 하나로 기업·항목을 찾아 편집을 연다 */
+function openDocCell(td) {
+  const company = findCompany(td.dataset.company);
+  const def = byDocKey(td.dataset.docKey);
+  if (company && def) editDocCell(td, company, def, td.dataset.pending);
+}
+
+/** O 표시는 눌러서 바로 토글, 날짜는 칸 안에서 월/일을 받는다 */
+function editDocCell(td, company, def, seed) {
+  if (docEditing) return;
+  if (def.type === 'mark') {
+    commitDocCell(td, company, def, filled(company.docs[def.k]) ? '' : 'O');
+    return;
+  }
+
+  docEditing = true;
+  const current = docCellText(company.docs[def.k]);
+  td.classList.add('editing');
+  td.innerHTML = `<div class="doc-edit-wrap">` +
+    `<input class="doc-edit" type="text" inputmode="numeric" placeholder="6/22" value="${esc(seed != null ? seed : current)}">` +
+    `<span class="doc-year-hint">${getBaseYear()}년</span></div>`;
+  const input = td.querySelector('input');
+  input.focus();
+  input.select();
+
+  let settled = false;
+  const close = () => { docEditing = false; td.classList.remove('editing'); };
+  const cancel = () => {
+    if (settled) return;
+    settled = true; close();
+    paintDocCell(td, company, def);
+    td.focus();
+  };
+  const commit = async (dCol, dRow) => {
+    if (settled) return;
+    settled = true;
+    const raw = input.value.trim();
+    close();
+    if (raw === (seed != null ? seed : current) && seed == null) paintDocCell(td, company, def);
+    else await commitDocCell(td, company, def, raw);
+    if (dCol || dRow) focusDocCell(moveDocCell(td, dCol, dRow));
+  };
+
+  input.onkeydown = e => {
+    // 칸(td)에도 같은 키 처리가 붙어 있어서, 막지 않으면 Enter가 버블링돼 편집기가 다시 열린다
+    e.stopPropagation();
+    if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    else if (e.key === 'Enter') { e.preventDefault(); commit(0, 1); }
+    else if (e.key === 'Tab') { e.preventDefault(); commit(e.shiftKey ? -1 : 1, 0); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); commit(0, 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); commit(0, -1); }
+  };
+  input.onblur = () => commit(0, 0);
+}
+
+/** 입력값 → 시트에 보낼 값. 월/일 형식이 아니면 null */
+function docSendValue(def, entered, year) {
+  if (def.type === 'mark') return entered ? 'O' : '';
+  const raw = String(entered || '').trim();
+  if (!raw) return '';
+  const date = monthDayToDate(raw, year);
+  if (!date) return null;
+  if (def.type === 'range') return `${iso(date)} ~ ${iso(new Date(year, 11, 31))}`;
+  return iso(date);
+}
+/** 저장 실패한 칸은 입력값을 품고 남는다 — 다시 누르면 그 값부터 이어서 고칠 수 있다 */
+function markCellFailed(td, raw, message) {
+  if (td) {
+    td.dataset.pending = raw;
+    td.classList.add('save-failed');
+    td.classList.remove('saving');
+    td.innerHTML = `<span class="doc-cell-failed">${esc(raw || '지움')}</span>`;
+    td.dataset.tip = `저장 실패 — ${message}\n눌러서 다시 시도`;
+  }
+  toast('저장 실패 — ' + message);
+}
+/** 연속 입력 중에는 토스트를 묶어서 한 번만 띄운다 */
+let savedBatch = { n: 0, timer: null };
+function noteSaved() {
+  savedBatch.n++;
+  clearTimeout(savedBatch.timer);
+  savedBatch.timer = setTimeout(() => {
+    toast(savedBatch.n === 1 ? '저장됨' : `${savedBatch.n}칸 저장됨`);
+    savedBatch.n = 0;
+  }, 900);
+}
+
+/**
+ * 한 칸을 시트에 반영한다.
+ * 응답을 기다리지 않고 화면에 먼저 넣고, 실패하면 되돌린 뒤 입력값을 셀에 남긴다.
+ */
+async function commitDocCell(td, company, def, entered, opts) {
+  const year = getBaseYear();
+  const sent = docSendValue(def, entered, year);
+  if (sent === null) {
+    markCellFailed(td, entered, '6/22 처럼 월/일로 적어주세요');
+    return false;
+  }
+  const lock = company.name + ' ' + def.k;
+  if (docSaving.has(lock)) return false;        // 같은 칸에 요청이 겹치지 않게
+  if (def.byCoach) {
+    if (!company.coach) {
+      markCellFailed(td, entered, '배정된 코치가 없습니다');
+      return false;
+    }
+    return commitCoachDoc(td, company.coach, def, sent, opts);
+  }
+
+  const docs = { [def.k]: sent };
+  if (def.k === 'teamStart') {                       // 약정 시작일을 고치면 종료일(+28일)도 같이
+    const date = isoToDate(sent);
+    docs.teamEnd = date ? iso(addDays(date, 28)) : '';
+  }
+  const keys = Object.keys(docs);
+  const rollback = {};
+  keys.forEach(k => { rollback[k] = company.docs[k]; });
+
+  keys.forEach(k => { company.docs[k] = localDocValue(k, docs[k]); });   // 낙관적 반영
+  company.docCount = DOC_DEFS.filter(d => filled(company.docs[d.k])).length;
+  repaintDocCells([company.name], keys);
+  if (td) td.classList.add('saving');
+  docSaving.add(lock);
+
+  try {
+    await requestSheetWrite(writeEndpoint(), 'updateDocs', { companyName: company.name, docs });
+    if (td) td.classList.remove('saving');
+    // O 표시는 클릭 한 번에 저장되므로 실수를 되돌릴 길을 남긴다
+    if (def.type === 'mark' && !(opts && opts.isUndo)) {
+      const back = docCellText(rollback[def.k]);
+      toastUndo(`${company.name} · ${def.label} ${sent ? '제출 표시' : '표시 해제'}`,
+        () => commitDocCell(td, company, def, back, { isUndo: true }));
+    } else {
+      noteSaved();
+    }
+    return true;
+  } catch (e) {
+    console.error(e);
+    keys.forEach(k => { company.docs[k] = rollback[k]; });
+    company.docCount = DOC_DEFS.filter(d => filled(company.docs[d.k])).length;
+    repaintDocCells([company.name], keys);
+    markCellFailed(td, entered, e.message || '저장 연결을 확인하세요');
+    return false;
+  } finally {
+    docSaving.delete(lock);
+  }
+}
+
+/** 서식8·9·10·통장사본은 코치 공통값이라 같은 코치의 모든 담당 기업에 함께 반영된다 */
+async function commitCoachDoc(td, coach, def, sent, opts) {
+  const mine = state.M.companies.filter(c => c.coachName === coach.name);
+  const lock = '코치:' + coach.name + ' ' + def.k;
+  if (docSaving.has(lock)) return false;
+
+  // 한 칸을 고치면 담당 기업 전부가 함께 바뀐다. 되돌리기가 아닐 때만 묻는다.
+  if (mine.length > 1 && !(opts && opts.isUndo)) {
+    const what = sent ? (def.type === 'mark' ? '제출 표시' : docCellText(localDocValue(def.k, sent))) : '지움';
+    const ok = confirm(
+      `${coach.name} 코치의 «${def.label}»을 ${what}(으)로 바꿉니다.\n\n` +
+      `이 코치가 담당하는 기업 ${mine.length}곳에 모두 반영됩니다.\n계속할까요?`
+    );
+    if (!ok) { if (td) repaintDocCells([td.dataset.company], [def.k]); return false; }
+  }
+
+  const rollbackCoach = coach[def.byCoach];
+  const rollback = new Map(mine.map(c => [c.name, c.docs[def.k]]));
+  const local = localDocValue(def.k, sent);
+
+  const apply = (coachValue, per) => {
+    coach[def.byCoach] = coachValue;
+    mine.forEach(c => {
+      c.docs[def.k] = per instanceof Map ? per.get(c.name) : per;
+      c.docCount = DOC_DEFS.filter(d => filled(c.docs[d.k])).length;
+    });
+    repaintDocCells(mine.map(c => c.name), [def.k]);
+  };
+
+  apply(local, local);                                // 낙관적 반영
+  if (td) td.classList.add('saving');
+  docSaving.add(lock);
+
+  try {
+    await requestSheetWrite(writeEndpoint(), 'updateCoachDocs', { coachName: coach.name, docs: { [def.k]: sent } });
+    if (td) td.classList.remove('saving');
+    toast(`${coach.name} 코치 공통 · ${def.label} — 담당 ${mine.length}곳 반영됨`);
+    return true;
+  } catch (e) {
+    console.error(e);
+    apply(rollbackCoach, rollback);
+    markCellFailed(td, docCellText(local), e.message || '저장 연결을 확인하세요');
+    return false;
+  } finally {
+    docSaving.delete(lock);
+  }
+}
+
+/* 상세 패널에서 부르는 창구 — 표가 아니라 패널 안에서 고칠 때는 대상 칸이 없다 */
+const saveDocCell = (company, def, entered) => commitDocCell(null, company, def, entered);
+const saveCoachDoc = (coach, def, entered) => {
+  const sent = docSendValue(def, entered, getBaseYear());
+  if (sent === null) { toast('6/22 처럼 월/일로 적어주세요'); return Promise.resolve(false); }
+  return commitCoachDoc(null, coach, def, sent);
+};
+
+/** 시트는 날짜를 serial로 돌려주므로, 화면 값도 같은 형식으로 맞춰둔다 */
+function localDocValue(key, sent) {
+  if (!sent) return '';
+  const def = byDocKey(key);
+  if (def.type === 'mark' || def.type === 'range') return sent;
+  const d = isoToDate(sent);
+  return d ? String(serialOf(d)) : sent;
+}
+
+/* ============================================================
+   10. 상세 패널(Drawer)
+   ============================================================ */
+const DRAWER = $('#drawer');
+const DRAWER_BACKDROP = $('#drawerBackdrop');
+let drawerReturnFocus = null;
+function closeDrawer() {
+  const wasOpen = DRAWER.classList.contains('open');
+  DRAWER.classList.remove('open');
+  DRAWER_BACKDROP.classList.remove('open');
+  DRAWER.setAttribute('aria-hidden', 'true');
+  DRAWER_BACKDROP.setAttribute('aria-hidden', 'true');
+  if (wasOpen && drawerReturnFocus && document.contains(drawerReturnFocus)) drawerReturnFocus.focus();
+}
+function openDrawer(title, sub, bodyHTML, onMount) {
+  drawerReturnFocus = document.activeElement;
+  DRAWER.innerHTML =
+    `<header><div style="flex:1"><h3>${title}</h3><div class="sub">${sub}</div></div>` +
+    `<button class="btn icon" id="drawerX" aria-label="닫기">✕</button></header>` +
+    `<div class="body">${bodyHTML}</div>`;
+  $('#drawerX').onclick = closeDrawer;
+  DRAWER.classList.add('open');
+  DRAWER_BACKDROP.classList.add('open');
+  DRAWER.setAttribute('aria-hidden', 'false');
+  DRAWER_BACKDROP.setAttribute('aria-hidden', 'false');
+  if (onMount) onMount(DRAWER);
+  requestAnimationFrame(() => $('#drawerX', DRAWER).focus());
+}
+const copyLine = (v, label) => v
+  ? `<button class="copy" data-copy="${esc(v)}" data-label="${esc(label)}">${esc(v)}</button>`
+  : '<span class="dim">—</span>';
+
+function openCompany(c, docsEditMode) {
+  docsEditMode = !!docsEditMode;
+  state.comp.sel = c.name;
+  const chk = STAGES.map(st => {
+    const items = DOC_DEFS.filter(d => d.stage === st).map(d => {
+      const has = filled(c.docs[d.k]);
+      if (docsEditMode) {
+        let control;
+        if (d.byCoach && !c.coach) {
+          control = '<span class="drawer-doc-locked">코치 미배정</span>';
+        } else if (!docEditable(d)) {
+          control = '<span class="drawer-doc-locked">자동 계산</span>';
+        } else if (d.type === 'mark') {
+          control = `<label class="drawer-doc-check"><input type="checkbox" data-doc-toggle="${esc(d.k)}"${has ? ' checked' : ''}><span>제출</span></label>`;
+        } else {
+          control = `<div class="drawer-doc-control">
+            <input type="text" inputmode="numeric" placeholder="6/22" value="${esc(docCellText(c.docs[d.k]))}" data-doc-input="${esc(d.k)}">
+            <button class="drawer-doc-save" type="button" data-doc-save="${esc(d.k)}">저장</button>
+          </div>`;
+        }
+        return `<div class="chk doc-row-edit ${has ? 'ok' : 'no'}"><div class="mk">${has ? '●' : '○'}</div>` +
+          `<div class="lb">${esc(d.label)}${d.byCoach ? '<em>코치 공통</em>' : ''}</div>${control}</div>`;
+      }
+      return `<div class="chk ${has ? 'ok' : 'no'}"><div class="mk">${has ? '●' : '○'}</div>` +
+        `<div class="lb">${esc(d.label)}${d.byCoach ? '<em>코치 공통</em>' : ''}</div>` +
+        `<div class="vl">${has ? esc(cellText(c.docs[d.k])) : '미제출'}</div></div>`;
+    }).join('');
+    const n = DOC_DEFS.filter(d => d.stage === st && filled(c.docs[d.k])).length;
+    const tot = DOC_DEFS.filter(d => d.stage === st).length;
+    return `<div class="stage-head">${st} <span class="dim">${n}/${tot}</span></div>${items}`;
+  }).join('');
+
+  const dd = c.dday == null ? '' :
+    c.dday < 0 ? `<span style="color:var(--critical);font-weight:650">${-c.dday}일 경과</span>`
+      : `<span${c.dday <= 14 ? ' style="font-weight:650"' : ''}>D-${c.dday}</span>`;
+  const deadline = !c.end
+    ? `<span class="dim">${esc(c.endRaw || '미정')}</span>`
+    : c.extended
+      ? `<span class="deadline-original">${korDate(c.end)}</span><span class="deadline-arrow">→</span>` +
+        `<span class="deadline-extended">${korDate(c.effectiveEnd)}</span>`
+      : korDate(c.end);
+  const consultationLine = (item, fallbackDate) => {
+    const date = item && item.date ? korDate(item.date)
+      : item && item.dateRaw ? esc(item.dateRaw)
+      : fallbackDate ? korDate(fallbackDate)
+      : '<span class="dim">미정</span>';
+    const time = item && item.time ? ` ${esc(item.time)}` : '';
+    const visit = item && item.visit
+      ? ` <span class="extension-badge">동행 · ${esc(item.owner || '담당자 미정')}</span>`
+      : '';
+    return `${date}${time}${visit}`;
+  };
+  const latestVisit = c.latestVisit && (c.latestVisit.owner || c.latestVisit.dateRaw || c.latestVisit.time)
+    ? `${c.latestVisit.date ? korDate(c.latestVisit.date) : esc(c.latestVisit.dateRaw || '일자 미정')} ${esc(c.latestVisit.time || '')} · ${esc(c.latestVisit.owner || '담당자 미정')}`
+    : '';
+
+  openDrawer(esc(c.name), `${badge(c.status)} <span class="dim">담당 ${esc(c.owner || '미배정')}</span>`, `
+    <div class="sect"><h4>기업 담당자</h4><dl class="kv">
+      <dt>성명</dt><dd>${esc(c.contact.name || '—')} <span class="dim">${esc(c.contact.title)}</span></dd>
+      <dt>연락처</dt><dd>${c.contact.phone.split('\n').map(p => copyLine(p.trim(), '연락처')).join('<br>')}</dd>
+      <dt>이메일</dt><dd>${c.contact.email.split('\n').map(p => copyLine(p.trim(), '이메일')).join('<br>')}</dd>
+    </dl></div>
+    <div class="sect"><h4>일정</h4><dl class="kv">
+      <dt>1차 컨설팅</dt><dd>${consultationLine(c.consultations[0], c.start)}</dd>
+      <dt>2차 컨설팅</dt><dd>${consultationLine(c.consultations[1], null)}</dd>
+      ${latestVisit ? `<dt>최근 방문</dt><dd>${latestVisit}</dd>` : ''}
+      <dt>종료 기한</dt><dd>${deadline} ${dd}</dd>
+      <dt>2주 연장</dt><dd><label class="extension-toggle">
+        <input type="checkbox" id="extensionCheck"${c.extended ? ' checked' : ''}${c.end ? '' : ' disabled'}>
+        <span>14일 연장 적용</span>
+      </label></dd>
+      <dt>약정 기간</dt><dd class="dim">${esc(cellText(c.docs.teamStart) || '—')} ~ ${esc(cellText(c.docs.teamEnd) || '—')}</dd>
+    </dl></div>
+    <div class="sect"><h4>배정 코치</h4><dl class="kv">
+      <dt>코치</dt><dd>${c.coachName ? esc(c.coachName) : '<span class="dim">미배정</span>'}</dd>
+      <dt>연락처</dt><dd>${copyLine(c.coachPhone, '코치 연락처')}</dd>
+      <dt>이메일</dt><dd>${copyLine(c.coachEmail, '코치 이메일')}</dd>
+    </dl></div>
+    <div class="sect">
+      <div class="sect-head"><h4>서류 ${c.docCount}/${DOC_DEFS.length}</h4>
+        <button class="doc-edit-toggle" type="button" id="editDocs">${docsEditMode ? '완료' : '수정'}</button>
+      </div>
+      <div class="coach-doc-note">서식8·9·10·통장 사본은 배정 코치의 공통값이며, 수정하면 같은 코치의 모든 기업에 반영됩니다.</div>
+      <div class="checklist">${chk}</div>
+    </div>
+    <div class="sect"><button class="btn primary" id="toMail" style="width:100%">이 기업으로 메일 작성 →</button></div>
+  `, d => {
+    $('#editDocs', d).onclick = () => {
+      openCompany(c, !docsEditMode);
+      requestAnimationFrame(() => $('#editDocs', DRAWER)?.focus());
+    };
+    if (docsEditMode) {
+      d.querySelectorAll('[data-doc-toggle]').forEach(box => {
+        box.onchange = async e => {
+          const key = e.currentTarget.dataset.docToggle;
+          const def = byDocKey(key);
+          e.currentTarget.disabled = true;
+          await saveDocCell(c, def, e.currentTarget.checked ? 'O' : '');
+          openCompany(c, true);
+          requestAnimationFrame(() => DRAWER.querySelector(`[data-doc-toggle="${key}"]`)?.focus());
+        };
+      });
+      d.querySelectorAll('[data-doc-save]').forEach(btn => {
+        const save = async () => {
+          const key = btn.dataset.docSave;
+          const def = byDocKey(key);
+          const input = btn.parentElement.querySelector('[data-doc-input]');
+          const entered = input.value.trim();
+          if (entered && !monthDayToDate(entered, getBaseYear())) {
+            input.classList.add('bad');
+            input.focus();
+            toast('6/22 처럼 월/일로 적어주세요');
+            return;
+          }
+          btn.disabled = true;
+          input.disabled = true;
+          btn.textContent = '저장 중';
+          await saveDocCell(c, def, entered);
+          openCompany(c, true);
+          requestAnimationFrame(() => {
+            const next = DRAWER.querySelector(`[data-doc-input="${key}"]`);
+            if (next) { next.focus(); next.select(); }
+          });
+        };
+        btn.onclick = save;
+        const input = btn.parentElement.querySelector('[data-doc-input]');
+        input.oninput = () => input.classList.remove('bad');
+        input.onkeydown = e => {
+          if (e.key === 'Enter') { e.preventDefault(); save(); }
+          if (e.key === 'Escape') { e.preventDefault(); openCompany(c, true); }
+        };
+      });
+    }
+    $('#extensionCheck', d).onchange = e => {
+      const enabled = e.target.checked;
+      setCompanyExtension(c, enabled);
+      render();
+      openCompany(c, docsEditMode);
+      requestAnimationFrame(() => $('#extensionCheck', DRAWER)?.focus());
+      toast(enabled ? `${c.name} 종료 기한을 2주 연장했습니다.` : `${c.name} 2주 연장을 해제했습니다.`);
+    };
+    $('#toMail', d).onclick = () => {
+      closeDrawer();
+      go('mail', { company: c.name, stage: guessStage(c), target: '기업 담당자', manual: '' });
+    };
+  });
+}
+
+/** 진행현황으로 메일 단계를 추정 */
+function guessStage(c) {
+  return ({ 검토요청: '신청단계', 검토완료: '신청단계', 컨설팅진행: '실시단계', 보고서제출: '실시단계', 지급준비: '지급단계', 지급완료: '지급단계' })[c.status] || '신청단계';
+}
+
+function openCoach(c, docsEditMode) {
+  docsEditMode = !!docsEditMode;
+  state.coach.sel = c.name;
+  const coachDocs = DOC_DEFS.filter(def => def.byCoach).map(def => {
+    const raw = c[def.byCoach];
+    const has = filled(raw);
+    if (!docsEditMode) {
+      return `<div class="chk ${has ? 'ok' : 'no'}"><div class="mk">${has ? '●' : '○'}</div>` +
+        `<div class="lb">${esc(def.label)}</div><div class="vl">${has ? esc(cellText(raw)) : '미제출'}</div></div>`;
+    }
+    const control = def.type === 'mark'
+      ? `<label class="drawer-doc-check"><input type="checkbox" data-coach-doc-toggle="${esc(def.k)}"${has ? ' checked' : ''}><span>제출</span></label>`
+      : `<div class="drawer-doc-control">
+          <input type="text" inputmode="numeric" placeholder="6/22" value="${esc(docCellText(raw))}" data-coach-doc-input="${esc(def.k)}">
+          <button class="drawer-doc-save" type="button" data-coach-doc-save="${esc(def.k)}">저장</button>
+        </div>`;
+    return `<div class="chk doc-row-edit ${has ? 'ok' : 'no'}"><div class="mk">${has ? '●' : '○'}</div>` +
+      `<div class="lb">${esc(def.label)}<em>코치 공통</em></div>${control}</div>`;
+  }).join('');
+  const comps = c.companies.length
+    ? c.companies.map(x => `<div class="chk"><div class="mk"></div><div class="lb">${esc(x.name)}</div>` +
+        `<div class="vl">${esc(x.status)}</div></div>`).join('')
+    : '<div class="empty">배정된 기업이 없습니다.</div>';
+
+  openDrawer(esc(c.name), `<span class="dim">내부 담당 ${esc(c.owner || '—')} · 담당 기업 ${c.companies.length}개사</span>`, `
+    <div class="sect"><h4>연락처</h4><dl class="kv">
+      <dt>휴대폰</dt><dd>${copyLine(c.phone, '연락처')}</dd>
+      <dt>이메일</dt><dd>${copyLine(c.email, '이메일')}</dd>
+      <dt>아이디</dt><dd>${esc(c.loginId || '—')}</dd>
+    </dl></div>
+    <div class="sect">
+      <div class="sect-head"><h4>제출 서류</h4>
+        <button class="doc-edit-toggle" type="button" id="editCoachDocs">${docsEditMode ? '완료' : '수정'}</button>
+      </div>
+      <div class="coach-doc-note">이 값은 이 코치가 담당하는 모든 기업의 서류 현황에 함께 반영됩니다.</div>
+      <div class="checklist">${coachDocs}</div>
+    </div>
+    <div class="sect"><h4>담당 기업</h4><div class="checklist">${comps}</div></div>
+    <div class="sect"><h4>개인정보</h4>
+      <details><summary class="dim" style="cursor:pointer;font-size:12.5px">표시하기</summary>
+      <dl class="kv" style="margin-top:8px">
+        <dt>생년월일</dt><dd>${esc(c.birth || '—')}</dd>
+        <dt>주소</dt><dd>${esc(c.address || '—')}</dd>
+      </dl></details>
+    </div>
+  `, d => {
+    $('#editCoachDocs', d).onclick = () => {
+      openCoach(c, !docsEditMode);
+      requestAnimationFrame(() => $('#editCoachDocs', DRAWER)?.focus());
+    };
+    if (!docsEditMode) return;
+    d.querySelectorAll('[data-coach-doc-toggle]').forEach(box => {
+      box.onchange = async e => {
+        const key = e.currentTarget.dataset.coachDocToggle;
+        const def = byDocKey(key);
+        e.currentTarget.disabled = true;
+        await saveCoachDoc(c, def, e.currentTarget.checked ? 'O' : '');
+        openCoach(c, true);
+        requestAnimationFrame(() => DRAWER.querySelector(`[data-coach-doc-toggle="${key}"]`)?.focus());
+      };
+    });
+    d.querySelectorAll('[data-coach-doc-save]').forEach(btn => {
+      const save = async () => {
+        const key = btn.dataset.coachDocSave;
+        const def = byDocKey(key);
+        const input = btn.parentElement.querySelector('[data-coach-doc-input]');
+        const entered = input.value.trim();
+        if (entered && !monthDayToDate(entered, getBaseYear())) {
+          input.classList.add('bad');
+          input.focus();
+          toast('6/22 처럼 월/일로 적어주세요');
+          return;
+        }
+        btn.disabled = true;
+        input.disabled = true;
+        btn.textContent = '저장 중';
+        await saveCoachDoc(c, def, entered);
+        openCoach(c, true);
+        requestAnimationFrame(() => {
+          const next = DRAWER.querySelector(`[data-coach-doc-input="${key}"]`);
+          if (next) { next.focus(); next.select(); }
+        });
+      };
+      btn.onclick = save;
+      const input = btn.parentElement.querySelector('[data-coach-doc-input]');
+      input.oninput = () => input.classList.remove('bad');
+      input.onkeydown = e => {
+        if (e.key === 'Enter') { e.preventDefault(); save(); }
+        if (e.key === 'Escape') { e.preventDefault(); openCoach(c, true); }
+      };
+    });
+  });
+}
+

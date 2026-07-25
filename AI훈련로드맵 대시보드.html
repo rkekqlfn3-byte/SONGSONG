@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="기업·코치·서류·일정을 한눈에 관리하는 AI훈련로드맵 사업 운영 콘솔">
+<meta name="theme-color" content="#0d2340">
+<title>AI훈련로드맵 운영 콘솔</title>
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-in">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">AI</div>
+      <div class="brand-copy">
+        <div class="eyebrow">AI TRAINING ROADMAP</div>
+        <h1>AI훈련로드맵 운영 콘솔</h1>
+        <p>경남경영자총협회 중소기업AI훈련확산센터</p>
+      </div>
+    </div>
+    <div class="topbar-tools">
+      <div class="stamp">
+        데이터 기준 <b id="stampDate">—</b>
+        <span id="stampSrc">—</span>
+      </div>
+      <label class="yearpick" for="baseYear" data-tip="서류·일정 입력의 기준 연도 — 월/일만 적으면 이 연도가 붙습니다">
+        <span>기준 연도</span>
+        <input type="number" id="baseYear" min="2000" max="2100" step="1" inputmode="numeric" autocomplete="off">
+      </label>
+      <button class="btn" id="btnAddCompany" data-tip="새 기업을 등록하고 Google Sheet에 저장합니다">＋ 기업</button>
+      <button class="btn primary" id="btnUpdate" data-tip="연결된 Google Sheet에서 최신 데이터를 바로 불러옵니다">↻ 동기화</button>
+      <button class="btn icon" id="btnSheetSettings" data-tip="Google Sheet 연결 주소 설정" aria-label="구글 시트 연결 설정">⚙</button>
+      <button class="btn icon" id="btnFile" data-tip="내려받은 Excel(.xlsx) 파일로 갱신" aria-label="엑셀 파일로 갱신">↑</button>
+      <button class="btn icon" id="btnTheme" data-tip="밝게 / 어둡게">◐</button>
+    </div>
+  </div>
+  <div class="confid"><div class="confid-in">
+    <b>대외비</b><span>개인정보 포함 · 사내 PC 전용 · 외부 반출 금지</span>
+  </div></div>
+  <div class="tabs" id="tabs" role="tablist"></div>
+</div>
+
+<main id="view" role="tabpanel" aria-live="polite"></main>
+
+<div class="drawer-backdrop" id="drawerBackdrop" aria-hidden="true"></div>
+<div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-hidden="true"></div>
+<div class="sync-dialog" id="syncDialog" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="syncTitle">
+  <div class="sync-panel">
+    <div class="sync-head">
+      <div>
+        <div class="eyebrow">GOOGLE SHEETS CONNECTION</div>
+        <h2 id="syncTitle">구글 시트 연결</h2>
+      </div>
+      <button class="btn icon" id="syncClose" aria-label="닫기">✕</button>
+    </div>
+    <div class="sync-body">
+      <label for="sheetEndpoint">Google Sheet 주소</label>
+      <input type="url" id="sheetEndpoint" placeholder="https://docs.google.com/spreadsheets/d/..." autocomplete="off">
+      <p>연결할 Google Sheet의 공유 주소입니다. 저장하면 다음 실행부터 최신 내용을 자동으로 확인합니다.</p>
+      <label class="sync-label-secondary" for="sheetWriteEndpoint">기업 저장용 Apps Script 주소</label>
+      <input type="url" id="sheetWriteEndpoint" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
+      <p>기업 추가 내용을 시트에 쓰기 위한 주소입니다. 제공된 저장 스크립트를 한 번 배포한 뒤 <b>/exec</b> 주소를 입력하세요.</p>
+      <div class="sync-state" id="syncState" aria-live="polite"></div>
+    </div>
+    <div class="sync-actions">
+      <button class="btn" id="syncDefault">기본 주소 사용</button>
+      <div class="spacer"></div>
+      <button class="btn" id="syncTest">연결 확인</button>
+      <button class="btn primary" id="syncSave">저장 후 동기화</button>
+    </div>
+  </div>
+</div>
+<div class="company-dialog" id="companyDialog" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="companyDialogTitle">
+  <div class="company-panel">
+    <div class="company-head">
+      <div>
+        <div class="eyebrow" id="companyDialogEyebrow">NEW COMPANY</div>
+        <h2 id="companyDialogTitle">기업 추가</h2>
+        <p id="companyDialogSub">등록하면 Google Sheet와 대시보드에 함께 반영됩니다.</p>
+      </div>
+      <button class="btn icon" id="companyClose" aria-label="닫기">✕</button>
+    </div>
+    <form id="companyForm">
+      <div class="company-form-tabs" id="companyFormTabs" role="tablist" aria-label="기업 정보 입력 단계">
+        <button class="company-form-tab" id="companyTabBasic" type="button" role="tab" aria-selected="true" aria-controls="companyStepBasic" data-company-step="basic">
+          기본 <span class="company-step-count" id="companyBasicCount">필수 0/2</span>
+        </button>
+        <button class="company-form-tab" id="companyTabSchedule" type="button" role="tab" aria-selected="false" aria-controls="companyStepSchedule" data-company-step="schedule" tabindex="-1">
+          일정 <span class="company-step-count" id="companyScheduleCount">0/2</span>
+        </button>
+        <button class="company-form-tab" id="companyTabDocs" type="button" role="tab" aria-selected="false" aria-controls="companyStepDocs" data-company-step="docs" tabindex="-1">
+          서류 <span class="company-step-count" id="companyDocsCount">0/15</span>
+        </button>
+      </div>
+      <div class="company-body">
+        <div class="company-step-panel" id="companyStepBasic" role="tabpanel" aria-labelledby="companyTabBasic" data-company-step-panel="basic">
+          <section class="company-section">
+            <h3>진행 및 배정</h3>
+            <div class="company-fields three">
+              <div class="company-field">
+                <label for="newStatus">진행현황 <b>*</b></label>
+                <select id="newStatus" required>
+                  <option value="검토요청">검토요청</option>
+                  <option value="검토완료">검토완료</option>
+                  <option value="컨설팅진행">컨설팅진행</option>
+                  <option value="보고서제출">보고서제출</option>
+                  <option value="지급준비">지급준비</option>
+                  <option value="지급완료">지급완료</option>
+                  <option value="기타">기타</option>
+                  <option value="신청불가">신청불가</option>
+                  <option value="신청취소">신청취소</option>
+                </select>
+              </div>
+              <div class="company-field">
+                <label for="newOwner">내부 담당자</label>
+                <select id="newOwner"><option value="">미배정</option></select>
+              </div>
+              <div class="company-field">
+                <label for="newCoach">훈련코치</label>
+                <select id="newCoach"><option value="">미배정</option></select>
+              </div>
+            </div>
+          </section>
+          <section class="company-section">
+            <h3>기업 및 담당자</h3>
+            <div class="company-fields">
+              <div class="company-field full">
+                <label for="newCompanyName">기업명 <b>*</b></label>
+                <input id="newCompanyName" type="text" placeholder="예: ㈜한국산업" required>
+              </div>
+              <div class="company-field">
+                <label for="newContactName">기업 담당자</label>
+                <input id="newContactName" type="text" placeholder="성명">
+              </div>
+              <div class="company-field">
+                <label for="newContactTitle">직급</label>
+                <input id="newContactTitle" type="text" placeholder="예: 부장">
+              </div>
+              <div class="company-field">
+                <label for="newContactPhone">전화번호</label>
+                <input id="newContactPhone" type="tel" placeholder="010-0000-0000">
+              </div>
+              <div class="company-field">
+                <label for="newContactEmail">이메일</label>
+                <input id="newContactEmail" type="email" placeholder="name@company.com">
+              </div>
+            </div>
+          </section>
+          <section class="company-section">
+            <h3>코치 연락처</h3>
+            <div class="company-fields">
+              <div class="company-field">
+                <label for="newCoachEmail">코치 이메일</label>
+                <input id="newCoachEmail" type="email" placeholder="코치 선택 시 자동 입력" readonly aria-describedby="coachContactHelp">
+              </div>
+              <div class="company-field">
+                <label for="newCoachPhone">코치 전화번호</label>
+                <input id="newCoachPhone" type="tel" placeholder="코치 선택 시 자동 입력" readonly aria-describedby="coachContactHelp">
+              </div>
+            </div>
+            <div class="coach-contact-tools">
+              <label class="coach-override-toggle" for="coachContactOverride">
+                <input id="coachContactOverride" type="checkbox">
+                <span>이 건만 다르게 입력</span>
+              </label>
+              <p class="coach-contact-help" id="coachContactHelp">훈련코치를 선택하면 코치 탭의 연락처가 자동 입력됩니다.</p>
+            </div>
+          </section>
+        </div>
+        <div class="company-step-panel" id="companyStepSchedule" role="tabpanel" aria-labelledby="companyTabSchedule" data-company-step-panel="schedule" hidden>
+          <section class="company-section">
+            <h3>컨설팅 일정</h3>
+            <div class="consult-sessions">
+              <div class="consult-session">
+                <div class="consult-session-head">
+                  <strong>1차 컨설팅</strong>
+                  <label class="visit-check" for="newConsult1Visit">
+                    <input id="newConsult1Visit" type="checkbox">
+                    <span>동행</span>
+                  </label>
+                </div>
+                <div class="consult-session-fields">
+                  <div class="company-field">
+                    <label for="newConsult1Date">컨설팅일 <span class="auto">월/일</span></label>
+                    <input id="newConsult1Date" type="text" placeholder="예: 6/22" inputmode="numeric" autocomplete="off">
+                  </div>
+                  <div class="company-field">
+                    <label for="newConsult1Time">시간</label>
+                    <input id="newConsult1Time" type="time">
+                  </div>
+                  <div class="company-field visit-owner">
+                    <label for="newConsult1Owner">동행 담당자</label>
+                    <select id="newConsult1Owner" disabled aria-describedby="newConsult1OwnerHint"><option value="">선택하세요</option></select>
+                    <span class="field-hint" id="newConsult1OwnerHint">동행 체크 시 선택할 수 있습니다.</span>
+                  </div>
+                </div>
+              </div>
+              <div class="consult-session">
+                <div class="consult-session-head">
+                  <strong>2차 컨설팅</strong>
+                  <label class="visit-check" for="newConsult2Visit">
+                    <input id="newConsult2Visit" type="checkbox">
+                    <span>동행</span>
+                  </label>
+                </div>
+                <div class="consult-session-fields">
+                  <div class="company-field">
+                    <label for="newConsult2Date">컨설팅일 <span class="auto">월/일</span></label>
+                    <input id="newConsult2Date" type="text" placeholder="예: 7/6" inputmode="numeric" autocomplete="off">
+                  </div>
+                  <div class="company-field">
+                    <label for="newConsult2Time">시간</label>
+                    <input id="newConsult2Time" type="time">
+                  </div>
+                  <div class="company-field visit-owner">
+                    <label for="newConsult2Owner">동행 담당자</label>
+                    <select id="newConsult2Owner" disabled aria-describedby="newConsult2OwnerHint"><option value="">선택하세요</option></select>
+                    <span class="field-hint" id="newConsult2OwnerHint">동행 체크 시 선택할 수 있습니다.</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p class="consult-schedule-note">동행을 체크하면 시트의 ‘방문(최근일자)’에도 가장 최근 일정과 담당자가 자동 반영됩니다. 내부 종료기한은 1차 컨설팅일 기준 28일로 계산됩니다.</p>
+            <div class="consult-legacy-visit" id="legacyVisitNote"></div>
+          </section>
+        </div>
+        <div class="company-step-panel" id="companyStepDocs" role="tabpanel" aria-labelledby="companyTabDocs" data-company-step-panel="docs" hidden>
+          <section class="company-section">
+            <details class="company-docs" id="companyDocs" open>
+              <summary>서류 제출 현황 <span class="hint">선택 입력 · 비워두면 나중에 시트에서 채울 수 있습니다</span></summary>
+              <div id="companyDocFields"></div>
+            </details>
+          </section>
+        </div>
+        <div class="company-state" id="companyState" aria-live="polite"></div>
+      </div>
+      <div class="company-actions">
+        <button class="btn" type="button" id="companyCancel">취소</button>
+        <div class="company-progress required-missing" id="companyProgress" aria-live="polite">
+          <strong>필수 0/2</strong><span class="sep" aria-hidden="true"></span><span>선택 8개 비어 있음</span>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn" type="button" id="companyOpenSettings">저장 연결 설정</button>
+        <button class="btn primary" type="submit" id="companySave" disabled>Google Sheet에 저장</button>
+      </div>
+    </form>
+  </div>
+</div>
+<div id="tip"></div>
+<div id="toast"></div>
+<div id="drop"><div class="inner">
+  <b>여기에 놓으세요</b>
+  <span>구글 시트에서 내려받은 .xlsx 파일</span>
+</div></div>
+<input type="file" id="filePick" accept=".xlsx,.csv" style="display:none">
+
+<script src="js/data.js"></script>
+<script src="js/core.js"></script>
+<script src="js/views.js"></script>
+<script src="js/documents.js"></script>
+<script src="js/mail.js"></script>
+<script src="js/sheet-api.js"></script>
+<script src="js/company-form.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
