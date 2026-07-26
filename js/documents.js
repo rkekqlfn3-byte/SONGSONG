@@ -32,6 +32,16 @@ function docsMobileCardInner(company, defs) {
     `<div class="docs-mobile-missing">${missingText}</div>`;
 }
 
+function paintDocsMobileCard(card, company, defs) {
+  card.innerHTML = docsMobileCardInner(company, defs) +
+    `<div class="docs-mobile-actions">` +
+    `<button type="button" data-mobile-doc-open>상세 보기</button>` +
+    `<button type="button" class="primary" data-mobile-doc-edit>서류 수정</button>` +
+    `</div>`;
+  $('[data-mobile-doc-open]', card).onclick = () => openCompany(company);
+  $('[data-mobile-doc-edit]', card).onclick = () => openCompany(company, true);
+}
+
 function viewDocs() {
   const s = state.docs;
   const defs = DOC_DEFS.filter(d => !s.stage || d.stage === s.stage);
@@ -73,6 +83,21 @@ function viewDocs() {
   ]);
   bar.appendChild(exp);
 
+  const stageShortcuts = el('nav', 'docs-stage-shortcuts');
+  stageShortcuts.setAttribute('aria-label', '서류 단계 빠른 선택');
+  [{ value: '', label: '전체' }, ...STAGES.map(stage => ({ value: stage, label: stage }))].forEach(item => {
+    const count = item.value ? DOC_DEFS.filter(def => def.stage === item.value).length : DOC_DEFS.length;
+    const button = el('button', '', `${item.label} ${count}`);
+    button.type = 'button';
+    button.setAttribute('aria-pressed', s.stage === item.value ? 'true' : 'false');
+    button.onclick = () => {
+      if (s.stage === item.value) return;
+      s.stage = item.value;
+      render();
+    };
+    stageShortcuts.appendChild(button);
+  });
+
   // 단계 그룹 헤더
   let groupRow =
     `<th class="stick-col stick-status matrix-status"></th>` +
@@ -103,12 +128,10 @@ function viewDocs() {
   const tbl = table(cols, list.map(c => (c._key = c.name, c)), { cls: 'matrix', groupRow, onPick: openCompany });
   const mobileList = el('div', 'docs-mobile-list');
   list.forEach(c => {
-    const card = el('button', 'docs-mobile-card');
-    card.type = 'button';
+    const card = el('article', 'docs-mobile-card');
     card.dataset.docCardCompany = c.name;
-    card.setAttribute('aria-label', `${c.name} 서류 상세 및 수정`);
-    card.innerHTML = docsMobileCardInner(c, defs);
-    card.onclick = () => openCompany(c);
+    card.setAttribute('aria-label', `${c.name} 서류 현황`);
+    paintDocsMobileCard(card, c, defs);
     mobileList.appendChild(card);
   });
 
@@ -167,7 +190,7 @@ function viewDocs() {
   sum.id = 'docsSummary';
 
   const box = el('div');
-  box.append(bar, overview, tbl, mobileList, sum);
+  box.append(bar, overview, stageShortcuts, tbl, mobileList, sum);
   requestAnimationFrame(refreshDocsSummary);   // 통계는 DOM에 붙은 뒤 채운다
   return box;
 }
@@ -224,7 +247,7 @@ function repaintDocCells(companyNames, keys) {
   document.querySelectorAll('[data-doc-card-company]').forEach(card => {
     if (!names.has(card.dataset.docCardCompany)) return;
     const company = findCompany(card.dataset.docCardCompany);
-    if (company) card.innerHTML = docsMobileCardInner(company, docsView.defs);
+    if (company) paintDocsMobileCard(card, company, docsView.defs);
   });
   refreshDocsSummary();
 }

@@ -72,9 +72,12 @@ function updateCompanyFormProgress() {
   scheduleTab.classList.toggle('is-incomplete', scheduleDone < 2);
   docsTab.classList.toggle('is-incomplete', docs.done < docs.total);
   const progress = $('#companyProgress');
+  const validationErrors = COMPANY_FORM.querySelectorAll('[aria-invalid="true"]').length;
   progress.classList.toggle('required-missing', requiredDone < requiredIds.length);
-  progress.innerHTML = `<strong>필수 ${requiredDone}/${requiredIds.length}</strong><span class="sep" aria-hidden="true"></span><span>선택 ${optionalMissing}개 비어 있음</span>`;
-  $('#companySave').disabled = companySaving || requiredDone < requiredIds.length;
+  progress.classList.toggle('has-errors', validationErrors > 0);
+  progress.innerHTML = `<strong>필수 ${requiredDone}/${requiredIds.length}</strong><span class="sep" aria-hidden="true"></span>` +
+    `<span>${validationErrors ? `입력 오류 ${validationErrors}개` : `선택 ${optionalMissing}개 비어 있음`}</span>`;
+  $('#companySave').disabled = companySaving || requiredDone < requiredIds.length || validationErrors > 0;
 }
 function populateCompanyChoices() {
   const owners = uniq(state.M.companies.map(c => c.owner).concat(state.M.coaches.map(c => c.owner)));
@@ -327,6 +330,7 @@ function openCompanyDialog() {
   companyEditTarget = null;
   setCompanyDialogMode(false);
   COMPANY_FORM.reset();
+  clearCompanyFieldValidations();
   populateCompanyChoices();
   $('#newStatus').value = '검토요청';
   fillConsultationFields(null);
@@ -351,6 +355,7 @@ function openCompanyEditDialog(company) {
   companyEditTarget = company;
   setCompanyDialogMode(true);
   COMPANY_FORM.reset();
+  clearCompanyFieldValidations();
   populateCompanyChoices();
   $('#newStatus').value = company.status;
   $('#newOwner').value = company.owner;
@@ -510,6 +515,90 @@ function companyFormDirty() {
   return COMPANY_DIALOG.classList.contains('open') && companyFormFingerprint() !== companyFormSnapshot;
 }
 
+const COMPANY_VALIDATION_IDS = [
+  'newCompanyName', 'newContactPhone', 'newContactEmail', 'newEmployeeCount',
+  'newWorkplaceNumber', 'newCoachEmail', 'newCoachPhone',
+  'newConsult1Date', 'newConsult2Date'
+];
+
+function companyValidationMessage(box) {
+  const value = String(box.value || '').trim();
+  if (box.id === 'newCompanyName') {
+    if (!value) return '기업명은 반드시 입력해주세요.';
+    if (state.M.companies.some(company => company !== companyEditTarget && company.name.trim() === value)) {
+      return '같은 기업명이 이미 등록되어 있습니다.';
+    }
+  }
+  if (box.id === 'newContactEmail' || box.id === 'newCoachEmail') {
+    if (value && box.validity.typeMismatch) return '이메일 형식을 확인해주세요. 예: name@company.com';
+  }
+  if (box.id === 'newContactPhone' || box.id === 'newCoachPhone') {
+    const digits = value.replace(/\D/g, '');
+    if (value && (!/^[+\d()\-\s]+$/.test(value) || digits.length < 9 || digits.length > 13)) {
+      return '전화번호는 숫자와 하이픈으로 입력해주세요.';
+    }
+  }
+  if (box.id === 'newEmployeeCount' && value) {
+    const count = Number(value);
+    if (!Number.isInteger(count) || count < 0) return '근로자 수는 0 이상의 정수로 입력해주세요.';
+  }
+  if (box.id === 'newWorkplaceNumber' && value) {
+    const digits = value.replace(/\D/g, '');
+    if (digits.length !== 11) return '사업장 관리번호 11자리를 확인해주세요.';
+  }
+  if (box.id === 'newConsult1Date' || box.id === 'newConsult2Date') {
+    const date = value ? monthDayToDate(value, getBaseYear()) : null;
+    if (value && !date) return '6/22처럼 월/일 형식으로 입력해주세요.';
+    const first = monthDayToDate($('#newConsult1Date').value, getBaseYear());
+    const second = monthDayToDate($('#newConsult2Date').value, getBaseYear());
+    if (box.id === 'newConsult2Date' && first && second && second < first) {
+      return '2차 컨설팅일은 1차 컨설팅일보다 빠를 수 없습니다.';
+    }
+  }
+  return '';
+}
+
+function paintCompanyFieldValidation(box, message) {
+  const host = box && box.closest('.company-field');
+  if (!host) return;
+  let note = host.querySelector(`.field-validation[data-for="${box.id}"]`);
+  if (!note) {
+    note = document.createElement('span');
+    note.className = 'field-validation';
+    note.dataset.for = box.id;
+    note.setAttribute('aria-live', 'polite');
+    host.appendChild(note);
+  }
+  box.classList.toggle('bad', !!message);
+  box.setAttribute('aria-invalid', message ? 'true' : 'false');
+  note.textContent = message;
+  note.classList.toggle('show', !!message);
+  note.classList.toggle('bad', !!message);
+  updateCompanyFormProgress();
+}
+
+function validateCompanyField(box) {
+  if (!box || !COMPANY_VALIDATION_IDS.includes(box.id) || box.disabled || box.readOnly) return true;
+  const message = companyValidationMessage(box);
+  paintCompanyFieldValidation(box, message);
+  return !message;
+}
+
+function validateCompanyFormFields() {
+  let firstInvalid = null;
+  COMPANY_VALIDATION_IDS.forEach(id => {
+    const box = $('#' + id);
+    if (!validateCompanyField(box) && !firstInvalid) firstInvalid = box;
+  });
+  return firstInvalid;
+}
+
+function clearCompanyFieldValidations() {
+  COMPANY_FORM.querySelectorAll('.field-validation').forEach(note => note.remove());
+  COMPANY_FORM.querySelectorAll('[aria-invalid="true"]').forEach(box => box.setAttribute('aria-invalid', 'false'));
+  COMPANY_FORM.querySelectorAll('.bad').forEach(box => box.classList.remove('bad'));
+}
+
 /** force: true 는 저장이 끝난 뒤처럼 물어볼 필요가 없을 때 쓴다 */
 function closeCompanyDialog(options) {
   const wasOpen = COMPANY_DIALOG.classList.contains('open');
@@ -566,10 +655,14 @@ function validateDocDates(year) {
   return null;
 }
 /** 문제가 된 칸을 붉게 표시하고 포커스 — 다시 입력하면 표시가 풀린다 */
-function markBadField(box) {
+function markBadField(box, message) {
   box.classList.add('bad');
+  if (message) paintCompanyFieldValidation(box, message);
   box.focus();
-  box.addEventListener('input', () => box.classList.remove('bad'), { once: true });
+  box.addEventListener('input', () => {
+    box.classList.remove('bad');
+    if (message) paintCompanyFieldValidation(box, '');
+  }, { once: true });
 }
 function setCompanyBusy(busy) {
   companySaving = busy;
@@ -581,6 +674,14 @@ function setCompanyBusy(busy) {
   updateCompanyFormProgress();
 }
 async function saveCompany() {
+  const liveInvalid = validateCompanyFormFields();
+  if (liveInvalid) {
+    const panel = liveInvalid.closest('[data-company-step-panel]');
+    setCompanyFormStep(panel ? panel.dataset.companyStepPanel : 'basic');
+    setCompanyState(companyValidationMessage(liveInvalid), 'bad');
+    requestAnimationFrame(() => liveInvalid.focus());
+    return;
+  }
   if (!COMPANY_FORM.checkValidity()) {
     const invalid = COMPANY_FORM.querySelector(':invalid');
     const panel = invalid && invalid.closest('[data-company-step-panel]');

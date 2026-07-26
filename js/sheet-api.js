@@ -6,6 +6,7 @@ const SHEET_ENDPOINT_KEY = LS_KEY + ':sheetEndpoint';
 const WRITE_ENDPOINT_KEY = LS_KEY + ':writeEndpoint';
 const BASE_YEAR_KEY = LS_KEY + ':baseYear';
 const EXTENSION_KEY = LS_KEY + ':twoWeekExtensions';
+const LAST_SYNC_KEY = LS_KEY + ':lastSuccessfulSync';
 const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q/edit';
 /*
  * 저장용 Apps Script 주소.
@@ -17,6 +18,68 @@ const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1zFc5m2g25y_CV
  * 이전 주소 AKfycbxF5kDX3… 은 공개 저장소에 올라갔던 이력이 있어 폐기했습니다.
  */
 const DEFAULT_WRITE_URL = 'https://script.google.com/macros/s/AKfycbwK8dm8mUev8vMZeLLHWRbQI-p0viyqIMzIuuVP7nxjA2V-CEd9Nc4dd02vexJvsZ8x3w/exec';
+
+let lastFailedWrite = null;
+function syncClock(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+function setSyncHealth(tone, message) {
+  const box = $('#syncHealth');
+  if (!box) return;
+  box.dataset.tone = tone || 'idle';
+  box.textContent = message || '동기화 대기';
+  box.title = tone === 'bad' ? '눌러서 다시 동기화' : '눌러서 지금 동기화';
+}
+function initSyncHealth() {
+  let saved = '';
+  try { saved = localStorage.getItem(LAST_SYNC_KEY) || ''; } catch {}
+  setSyncHealth(saved ? 'ok' : 'idle', saved ? `최근 동기화 ${syncClock(saved)}` : '동기화 대기');
+}
+function failedWriteLabel(action, payload) {
+  const target = payload && (payload.companyName || payload.originalCompanyName || payload.coachName);
+  const actionNames = {
+    addCompany: '기업 추가', updateCompany: '기업 수정', updateDocs: '서류 저장',
+    updateCoachDocs: '코치 서류 저장', updateExtension: '2주 연장 저장'
+  };
+  return `${actionNames[action] || '저장'}${target ? ` · ${target}` : ''}`;
+}
+function paintSaveRetryBanner(message) {
+  const banner = $('#saveRetryBanner');
+  if (!banner) return;
+  banner.hidden = !lastFailedWrite;
+  if (lastFailedWrite) $('#saveRetryMessage').textContent = `${failedWriteLabel(lastFailedWrite.action, lastFailedWrite.payload)} — ${message || lastFailedWrite.message}`;
+}
+function rememberFailedWrite(endpoint, action, payload, message) {
+  lastFailedWrite = { endpoint, action, payload: { ...(payload || {}) }, message: message || '연결을 확인해주세요.' };
+  paintSaveRetryBanner();
+}
+function clearFailedWrite() {
+  lastFailedWrite = null;
+  paintSaveRetryBanner('');
+}
+async function retryLastFailedWrite() {
+  if (!lastFailedWrite) return false;
+  const retry = lastFailedWrite;
+  const button = $('#saveRetryButton');
+  if (button) { button.disabled = true; button.textContent = '다시 저장 중…'; }
+  try {
+    await requestSheetWrite(retry.endpoint, retry.action, retry.payload);
+    clearFailedWrite();
+    await syncFromSheet(localStorage.getItem(SHEET_ENDPOINT_KEY) || DEFAULT_SHEET_URL, {
+      silent: true, reason: 'after-write'
+    });
+    toast('재저장과 화면 동기화를 완료했습니다.');
+    return true;
+  } catch (error) {
+    paintSaveRetryBanner(error.message || '재저장에 실패했습니다.');
+    toast('재저장 실패 — 연결을 확인해주세요.');
+    return false;
+  } finally {
+    if (button) { button.disabled = false; button.textContent = '다시 저장'; }
+  }
+}
 
 /** 예전 버전에서 브라우저에만 저장했던 연장값. 시트 열이 생기기 전 데이터의 일회성 호환용이다. */
 function readExtensions() {
@@ -218,7 +281,7 @@ function closeSyncDialog() {
 function setSyncBusy(busy) {
   const main = $('#btnUpdate');
   main.disabled = busy;
-  main.textContent = busy ? '동기화 중…' : '↻ 구글 시트 동기화';
+  main.textContent = busy ? '동기화 중…' : '↻ 동기화';
   $('#syncTest').disabled = busy;
   $('#syncSave').disabled = busy;
 }
@@ -259,11 +322,13 @@ async function syncFromSheetOnce(endpoint, opts) {
     return false;
   }
   setSyncBusy(true);
+  setSyncHealth('busy', '동기화 중…');
   if (opts.inDialog) setSyncState('Google Sheet에서 데이터를 확인하고 있습니다…', '');
   try {
     const raw = await fetchSheetData(clean);
     if (opts.testOnly) {
       setSyncState('연결 성공 — 필요한 시트 4개를 모두 확인했습니다.', 'ok');
+      setSyncHealth('ok', '연결 정상');
       return true;
     }
     if (opts.saveEndpoint) localStorage.setItem(SHEET_ENDPOINT_KEY, clean);
@@ -273,6 +338,9 @@ async function syncFromSheetOnce(endpoint, opts) {
         ? 'Google Sheet · 저장 후 동기화'
         : 'Google Sheet · 자동 동기화';
     applyData(raw, sourceLabel, true);
+    const completedAt = new Date().toISOString();
+    try { localStorage.setItem(LAST_SYNC_KEY, completedAt); } catch {}
+    setSyncHealth('ok', `최근 동기화 ${syncClock(completedAt)}`);
     if (!opts.silent) toast('Google Sheet 최신 데이터로 동기화했습니다.');
     if (opts.inDialog) setSyncState('동기화 완료 — 연결 주소를 저장했습니다.', 'ok');
     if (!opts.silent && typeof addLog === 'function') {
@@ -282,6 +350,7 @@ async function syncFromSheetOnce(endpoint, opts) {
   } catch (e) {
     console.error(e);
     const msg = '동기화 실패 — ' + (e.message || '데이터를 불러오지 못했습니다.');
+    setSyncHealth('bad', '동기화 실패 · 재시도');
     if (opts.inDialog) setSyncState(msg, 'bad');
     else if (!opts.silent) toast(msg + ' 기존 데이터 유지');
     if (!opts.silent && typeof addLog === 'function') addLog('SYNC', 'Google Sheet', msg, 'bad', { success: false });
@@ -338,7 +407,10 @@ function requestSheetWrite(endpoint, action, payload) {
       addLog(audit.type || 'EDIT', audit.target || '공통', detail, success ? (audit.tone || 'info') : 'bad', {
         requestId,
         source: '웹',
-        success
+        success,
+        before: audit.before || '',
+        after: audit.after || '',
+        error: success ? '' : message
       });
     };
     const clear = () => {
@@ -349,6 +421,7 @@ function requestSheetWrite(endpoint, action, payload) {
     const timer = setTimeout(() => {
       clear();
       finishAudit(false, '저장 요청 시간이 초과되었습니다.');
+      if (audit) rememberFailedWrite(clean, action, payload, '저장 요청 시간이 초과되었습니다.');
       reject(new Error('저장 요청 시간이 초과되었습니다.'));
     }, 25000);
     window[callback] = response => {
@@ -356,15 +429,18 @@ function requestSheetWrite(endpoint, action, payload) {
       if (!response || response.ok !== true) {
         const message = (response && response.error) || '시트 저장에 실패했습니다.';
         finishAudit(false, message);
+        if (audit) rememberFailedWrite(clean, action, payload, message);
         reject(new Error(message));
         return;
       }
       finishAudit(true, '');
+      if (audit) clearFailedWrite();
       resolve({ ...response, requestId });
     };
     script.onerror = () => {
       clear();
       finishAudit(false, '저장용 웹 앱에 연결하지 못했습니다.');
+      if (audit) rememberFailedWrite(clean, action, payload, '저장용 웹 앱에 연결하지 못했습니다.');
       reject(new Error('저장용 웹 앱에 연결하지 못했습니다.'));
     };
     script.src = url.href;
@@ -377,12 +453,45 @@ async function refreshActivityLogsFromSheet(options) {
   try {
     const response = await requestSheetWrite(writeEndpoint(), 'getAuditLogs', { limit: 100 });
     if (typeof setSheetActivityLogs === 'function') setSheetActivityLogs(response.logs || []);
+    paintAuditHealth(response.auditStatus);
     if (!opts.silent) toast(`시트 감사 로그 ${response.logs ? response.logs.length : 0}건을 불러왔습니다.`);
     return true;
   } catch (error) {
     console.error(error);
+    paintAuditHealth(null, error.message || '확인 실패');
     if (!opts.silent) toast('시트 감사 로그를 불러오지 못했습니다. Apps Script 새 버전을 배포했는지 확인해주세요.');
     return false;
+  }
+}
+
+function paintAuditHealth(status, error) {
+  const box = $('#auditHealth');
+  const text = $('#auditHealthText');
+  if (!box || !text) return;
+  if (error) {
+    box.dataset.tone = 'bad';
+    text.textContent = `시트 감사 상태 확인 실패 — ${error}`;
+    return;
+  }
+  if (!status) {
+    box.dataset.tone = 'warn';
+    text.textContent = 'Apps Script 새 버전 배포 후 감사 트리거 상태를 확인할 수 있습니다.';
+    return;
+  }
+  if (status.error) {
+    box.dataset.tone = 'warn';
+    text.textContent = `감사 트리거 상태를 읽지 못했습니다 — ${status.error}`;
+    return;
+  }
+  if (status.editInstalled && status.changeInstalled) {
+    box.dataset.tone = 'ok';
+    text.textContent = '시트 셀 수정·행/열 구조 변경 감사가 모두 작동 중입니다.';
+  } else if (status.editInstalled) {
+    box.dataset.tone = 'warn';
+    text.textContent = '셀 수정 감사만 작동 중 · installAuditTrigger를 다시 실행해주세요.';
+  } else {
+    box.dataset.tone = 'bad';
+    text.textContent = '시트 직접 수정 감사가 꺼져 있습니다 · installAuditTrigger 실행 필요';
   }
 }
 

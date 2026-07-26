@@ -546,6 +546,7 @@ function meter(n, total) {
    ============================================================ */
 const LOG_KEY = APP_STORAGE_KEY + ':activityLogs';
 let sheetActivityLogs = [];
+const activityLogFilters = { q: '', source: '', type: '', success: '' };
 
 function getLocalActivityLogs() {
   try {
@@ -564,13 +565,17 @@ function setSheetActivityLogs(logs) {
     tone: log.success === false ? 'bad' : 'info',
     source: log.source || '시트',
     actor: log.actor || '',
-    success: log.success !== false
+    success: log.success !== false,
+    before: log.before || '',
+    after: log.after || '',
+    error: log.error || ''
   }));
   renderActivityLogs();
 }
 
 function getActivityLogs() {
-  const merged = [...getLocalActivityLogs(), ...sheetActivityLogs];
+  // 같은 요청 ID가 양쪽에 있으면 작업자·변경 전후가 더 정확한 시트 로그를 우선한다.
+  const merged = [...sheetActivityLogs, ...getLocalActivityLogs()];
   const unique = new Map();
   merged.forEach(log => {
     const key = log.id || `${log.time}\u0000${log.type}\u0000${log.target}\u0000${log.detail}`;
@@ -595,7 +600,10 @@ function addLog(actionType, targetName, detailText, tone = 'info', options) {
     detail: detailText || '',
     tone: tone,
     source: opts.source || '웹',
-    success: opts.success !== false
+    success: opts.success !== false,
+    before: opts.before || '',
+    after: opts.after || '',
+    error: opts.error || ''
   };
   logs.unshift(entry);
   if (logs.length > 100) logs.pop(); // 최근 100건 보관
@@ -611,16 +619,54 @@ function clearActivityLogs() {
   toast('이 브라우저의 임시 작업 이력을 비웠습니다. 시트 감사 로그는 유지됩니다.');
 }
 
+function activityTypeGroup(type) {
+  if (['ADD', 'EDIT', 'CANCEL', 'RESTORE', 'EXTEND', 'updateCompany'].includes(type)) return 'company';
+  if (['DOC', 'COACH_DOC'].includes(type)) return 'document';
+  if (['SYNC', 'SETTING'].includes(type)) return 'sync';
+  if (['SHEET_EDIT', 'SHEET_CHANGE'].includes(type)) return 'sheet';
+  return '';
+}
+
+function setActivityLogFilters() {
+  activityLogFilters.q = ($('#activitySearch') || {}).value || '';
+  activityLogFilters.source = ($('#activitySource') || {}).value || '';
+  activityLogFilters.type = ($('#activityType') || {}).value || '';
+  activityLogFilters.success = ($('#activitySuccess') || {}).value || '';
+  renderActivityLogs();
+}
+
+function getFilteredActivityLogs() {
+  const q = searchKey(activityLogFilters.q || '');
+  return getActivityLogs().filter(log => {
+    const source = String(log.source || '').toLowerCase();
+    const sourceKind = source.includes('시트') || source === 'sheet' ? 'sheet' : 'web';
+    if (activityLogFilters.source && sourceKind !== activityLogFilters.source) return false;
+    if (activityLogFilters.type && activityTypeGroup(log.type) !== activityLogFilters.type) return false;
+    if (activityLogFilters.success === 'success' && log.success === false) return false;
+    if (activityLogFilters.success === 'failure' && log.success !== false) return false;
+    if (q && !searchKey([log.type, log.target, log.detail, log.actor, log.source, log.before, log.after, log.error].join(' ')).includes(q)) return false;
+    return true;
+  });
+}
+
+function activityDiffText(value) {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value !== 'string') return JSON.stringify(value, null, 2);
+  try { return JSON.stringify(JSON.parse(value), null, 2); }
+  catch { return value; }
+}
+
 function renderActivityLogs() {
   const container = $('#activityLogList');
   const countEl = $('#activityLogCount');
   const btnEl = $('#btnActivityLog');
-  const logs = getActivityLogs();
-  if (btnEl) btnEl.textContent = `📋 작업 로그 (${logs.length})`;
+  const allLogs = getActivityLogs();
+  const logs = getFilteredActivityLogs();
+  if (btnEl) btnEl.textContent = `📋 작업 로그 (${allLogs.length})`;
   if (!container) return;
-  if (countEl) countEl.textContent = `기록 ${logs.length}건`;
+  if (countEl) countEl.textContent = `표시 ${logs.length}건 / 전체 ${allLogs.length}건`;
   if (!logs.length) {
-    container.innerHTML = '<div class="empty" style="text-align:center;padding:24px 0;">아직 기록된 작업 이력이 없습니다.</div>';
+    container.innerHTML = `<div class="empty" style="text-align:center;padding:24px 0;">${allLogs.length ? '조건에 맞는 작업 이력이 없습니다.' : '아직 기록된 작업 이력이 없습니다.'}</div>`;
     return;
   }
   container.innerHTML = logs.map(log => {
@@ -628,20 +674,26 @@ function renderActivityLogs() {
     const typeLabels = {
       SYNC: '동기화', ADD: '기업 추가', EDIT: '정보 수정',
       CANCEL: '신청취소', RESTORE: '취소 복원', DOC: '서류 변경',
-      COACH_DOC: '코치 서류', EXTEND: '기한 연장', SETTING: '설정 변경'
+      COACH_DOC: '코치 서류', EXTEND: '기한 연장', SETTING: '설정 변경',
+      SHEET_EDIT: '셀 직접 수정', SHEET_CHANGE: '시트 구조 변경',
+      updateCompany: '정보 수정'
     };
     const badgeType = typeLabels[log.type] || log.type || '기타';
+    const before = activityDiffText(log.before);
+    const after = activityDiffText(log.after);
     return `
-      <div class="activity-log-item${toneClass}" style="padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);font-size:12.5px;display:flex;flex-direction:column;gap:4px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-          <div style="display:flex;align-items:center;gap:6px;">
-            <span class="badge" style="font-size:10.5px;padding:2px 7px;">${esc(badgeType)}</span>
-            <strong style="color:var(--ink-1);font-size:13px;">${esc(log.target)}</strong>
+      <div class="activity-log-item${toneClass}">
+        <div class="activity-log-head">
+          <div class="activity-log-title">
+            <span class="badge">${esc(badgeType)}</span>
+            <strong>${esc(log.target)}</strong>
           </div>
-          <span style="font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums;">${esc(log.time)}</span>
+          <span class="activity-log-time">${esc(log.time)}</span>
         </div>
-        <div style="color:var(--ink-2);font-size:12px;word-break:break-all;line-height:1.4;">${esc(log.detail)}</div>
-        ${(log.actor || log.source) ? `<div style="color:var(--ink-3);font-size:10.5px;">${esc([log.actor, log.source].filter(Boolean).join(' · '))}</div>` : ''}
+        ${log.detail ? `<div class="activity-log-detail">${esc(log.detail)}</div>` : ''}
+        ${(before || after) ? `<details class="activity-log-diff"><summary>변경 전후 보기</summary><div class="activity-diff-grid">${before ? `<div><b>변경 전</b><pre>${esc(before)}</pre></div>` : ''}${after ? `<div><b>변경 후</b><pre>${esc(after)}</pre></div>` : ''}</div></details>` : ''}
+        ${log.error ? `<div class="activity-log-error">오류: ${esc(log.error)}</div>` : ''}
+        ${(log.actor || log.source) ? `<div class="activity-log-meta">${esc([log.actor, log.source].filter(Boolean).join(' · '))}</div>` : ''}
       </div>
     `;
   }).join('');

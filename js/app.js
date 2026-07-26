@@ -29,6 +29,13 @@
     const endpoint = localStorage.getItem(SHEET_ENDPOINT_KEY) || DEFAULT_SHEET_URL;
     syncFromSheet(endpoint, { saveEndpoint: true, reason: 'manual' });
   };
+  initSyncHealth();
+  $('#syncHealth').onclick = () => {
+    const endpoint = localStorage.getItem(SHEET_ENDPOINT_KEY) || DEFAULT_SHEET_URL;
+    syncFromSheet(endpoint, { saveEndpoint: true, reason: 'manual' });
+  };
+  $('#saveRetryButton').onclick = retryLastFailedWrite;
+  $('#saveRetryDismiss').onclick = clearFailedWrite;
   $('#btnSheetSettings').onclick = openSyncDialog;
   $('#syncClose').onclick = closeSyncDialog;
   SYNC_DIALOG.onclick = e => { if (e.target === SYNC_DIALOG) closeSyncDialog(); };
@@ -113,8 +120,20 @@
   });
   COMPANY_FORM.addEventListener('input', updateCompanyFormProgress);
   COMPANY_FORM.addEventListener('change', updateCompanyFormProgress);
+  COMPANY_FORM.addEventListener('focusout', event => validateCompanyField(event.target));
+  COMPANY_FORM.addEventListener('input', event => {
+    if (!COMPANY_VALIDATION_IDS.includes(event.target.id)) return;
+    clearTimeout(event.target._companyValidationTimer);
+    event.target._companyValidationTimer = setTimeout(() => validateCompanyField(event.target), 280);
+  });
+  COMPANY_FORM.addEventListener('change', event => validateCompanyField(event.target));
   COMPANY_DIALOG.onclick = e => { if (e.target === COMPANY_DIALOG) closeCompanyDialog(); };
   COMPANY_FORM.onsubmit = e => { e.preventDefault(); saveCompany(); };
+  addEventListener('beforeunload', event => {
+    if (!companyFormDirty()) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
 
   // Excel 파일 선택 / 드래그앤드롭 — 비상용 수동 갱신
   const pick = $('#filePick');
@@ -172,6 +191,10 @@
   };
   $('#btnActivityLog').onclick = openActivityDrawer;
   $('#activityDrawerX').onclick = closeActivityDrawer;
+  ['activitySearch', 'activitySource', 'activityType', 'activitySuccess'].forEach(id => {
+    const box = $('#' + id);
+    box.addEventListener(id === 'activitySearch' ? 'input' : 'change', setActivityLogFilters);
+  });
   $('#btnClearLog').onclick = async () => {
     const button = $('#btnClearLog');
     button.disabled = true;
@@ -181,11 +204,14 @@
     button.textContent = '새로고침';
   };
   $('#btnExportLog').onclick = () => {
-    const logs = getActivityLogs();
+    const logs = getFilteredActivityLogs();
     if (!logs.length) { toast('다운로드할 작업 이력이 없습니다.'); return; }
     csvDownload('작업이력_로그.csv', [
-      ['시각', '작업구분', '대상', '상세내용', '작업자', '입력경로', '성공여부'],
-      ...logs.map(l => [l.time, l.type, l.target, l.detail, l.actor || '', l.source || '', l.success === false ? '실패' : '성공'])
+      ['시각', '작업구분', '대상', '상세내용', '변경 전', '변경 후', '오류', '작업자', '입력경로', '성공여부'],
+      ...logs.map(l => [
+        l.time, l.type, l.target, l.detail, activityDiffText(l.before), activityDiffText(l.after),
+        l.error || '', l.actor || '', l.source || '', l.success === false ? '실패' : '성공'
+      ])
     ]);
   };
   addEventListener('storage', event => {

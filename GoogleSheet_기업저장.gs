@@ -27,7 +27,7 @@
  *   ?action=updateExtension&payload=... 기업 종료기한 2주 연장 여부 수정
  */
 
-const VERSION = '2026-07-26-fixes1';
+const VERSION = '2026-07-26-ux2';
 
 const SPREADSHEET_ID = '1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q';
 /*
@@ -177,7 +177,12 @@ function doGet(e) {
     if (action === 'getAuditLogs') {
       const requested = JSON.parse((e.parameter && e.parameter.payload) || '{}');
       const limit = Math.min(Math.max(parseInt(requested.limit || e.parameter.limit, 10) || 100, 1), 500);
-      return response_({ ok: true, version: VERSION, logs: getAuditLogs_(limit) }, e);
+      return response_({
+        ok: true,
+        version: VERSION,
+        logs: getAuditLogs_(limit),
+        auditStatus: auditTriggerStatus_()
+      }, e);
     }
 
     payload = JSON.parse((e.parameter && e.parameter.payload) || '{}');
@@ -841,26 +846,46 @@ function getAuditLogs_(limit) {
   });
 }
 
+function auditTriggerStatus_() {
+  const status = { editInstalled: false, changeInstalled: false, installedCount: 0 };
+  try {
+    ScriptApp.getProjectTriggers().forEach(function (trigger) {
+      const handler = trigger.getHandlerFunction();
+      if (handler === 'auditSheetEdit') status.editInstalled = true;
+      if (handler === 'auditSheetChange') status.changeInstalled = true;
+    });
+    status.installedCount = (status.editInstalled ? 1 : 0) + (status.changeInstalled ? 1 : 0);
+  } catch (error) {
+    status.error = error && error.message ? error.message : String(error);
+  }
+  return status;
+}
+
+function isAuditedSheetName_(sheetName) {
+  return !!sheetName && sheetName !== AUDIT_SHEET;
+}
+
 /**
- * 시트에서 사람이 직접 바꾼 셀도 작업로그에 남긴다.
+ * 시트에서 사람이 직접 바꾼 셀과 행·열 구조 변경도 작업로그에 남긴다.
  * Apps Script 편집기에서 installAuditTrigger를 한 번 직접 실행해야 한다.
  */
 function installAuditTrigger() {
   const book = SpreadsheetApp.openById(SPREADSHEET_ID);
   ScriptApp.getProjectTriggers().forEach(function (trigger) {
-    if (trigger.getHandlerFunction() === 'auditSheetEdit') ScriptApp.deleteTrigger(trigger);
+    const handler = trigger.getHandlerFunction();
+    if (handler === 'auditSheetEdit' || handler === 'auditSheetChange') ScriptApp.deleteTrigger(trigger);
   });
   ScriptApp.newTrigger('auditSheetEdit').forSpreadsheet(book).onEdit().create();
+  ScriptApp.newTrigger('auditSheetChange').forSpreadsheet(book).onChange().create();
   ensureAuditSheet_(book);
-  return 'auditSheetEdit 설치 완료';
+  return 'auditSheetEdit + auditSheetChange 설치 완료';
 }
 
 function auditSheetEdit(e) {
   if (!e || !e.range) return;
   const sheet = e.range.getSheet();
   const sheetName = sheet.getName();
-  if (sheetName === AUDIT_SHEET) return;
-  if (SOURCE_SHEET_NAMES.indexOf(sheetName) < 0 && sheetName !== COACH_SHEET && sheetName !== DOCUMENT_SHEET) return;
+  if (!isAuditedSheetName_(sheetName)) return;
 
   let actor = '';
   try { actor = Session.getActiveUser().getEmail(); } catch (error) {}
@@ -875,6 +900,34 @@ function auditSheetEdit(e) {
     detail: e.range.getNumRows() === 1 && e.range.getNumColumns() === 1 ? '셀 직접 수정' : '범위 직접 수정',
     before: Object.prototype.hasOwnProperty.call(e, 'oldValue') ? e.oldValue : '',
     after: after,
+    source: 'sheet',
+    success: true,
+    error: ''
+  });
+}
+
+function auditSheetChange(e) {
+  if (!e || !e.source || e.changeType === 'EDIT') return;
+  const sheet = e.source.getActiveSheet();
+  const sheetName = sheet ? sheet.getName() : '';
+  if (!isAuditedSheetName_(sheetName)) return;
+  const labels = {
+    INSERT_ROW: '행 추가', REMOVE_ROW: '행 삭제',
+    INSERT_COLUMN: '열 추가', REMOVE_COLUMN: '열 삭제',
+    INSERT_GRID: '시트 추가', REMOVE_GRID: '시트 삭제',
+    FORMAT: '서식 변경', OTHER: '기타 구조 변경'
+  };
+  let actor = '';
+  try { actor = Session.getActiveUser().getEmail(); } catch (error) {}
+  const changeType = e.changeType || 'OTHER';
+  appendAuditLog_({
+    requestId: 'sheet_change_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+    actor: actor || '시트 사용자',
+    action: 'SHEET_CHANGE',
+    target: sheetName || '스프레드시트',
+    detail: labels[changeType] || changeType,
+    before: '',
+    after: { changeType: changeType, sheet: sheetName },
     source: 'sheet',
     success: true,
     error: ''
