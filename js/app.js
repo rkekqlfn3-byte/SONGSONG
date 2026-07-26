@@ -27,13 +27,13 @@
   // Google Sheet 동기화 / 연결 설정
   $('#btnUpdate').onclick = () => {
     const endpoint = localStorage.getItem(SHEET_ENDPOINT_KEY) || DEFAULT_SHEET_URL;
-    syncFromSheet(endpoint, { saveEndpoint: true });
+    syncFromSheet(endpoint, { saveEndpoint: true, reason: 'manual' });
   };
   $('#btnSheetSettings').onclick = openSyncDialog;
   $('#syncClose').onclick = closeSyncDialog;
   SYNC_DIALOG.onclick = e => { if (e.target === SYNC_DIALOG) closeSyncDialog(); };
   $('#syncTest').onclick = async () => {
-    const readOk = await syncFromSheet(SYNC_ENDPOINT.value, { inDialog: true, testOnly: true });
+    const readOk = await syncFromSheet(SYNC_ENDPOINT.value, { inDialog: true, testOnly: true, reason: 'manual', force: true });
     if (!readOk || !SYNC_WRITE_ENDPOINT.value.trim()) return;
     try {
       await requestSheetWrite(SYNC_WRITE_ENDPOINT.value, 'ping', {});
@@ -48,7 +48,7 @@
       try { localStorage.setItem(WRITE_ENDPOINT_KEY, normalizeWriteEndpoint(writeRaw)); }
       catch (e) { setSyncState(e.message, 'bad'); return; }
     }
-    const ok = await syncFromSheet(SYNC_ENDPOINT.value, { inDialog: true, saveEndpoint: true });
+    const ok = await syncFromSheet(SYNC_ENDPOINT.value, { inDialog: true, saveEndpoint: true, reason: 'manual', force: true });
     if (ok) closeSyncDialog();
   };
   $('#syncDefault').onclick = () => {
@@ -71,6 +71,7 @@
     setBaseYear(picked);
     updateCoachContact();
     syncTeamEnd();
+    if (typeof addLog === 'function') addLog('SETTING', '기준 연도', `${picked}년으로 변경`, 'info');
     toast(`기준 연도 ${picked}년`);
   };
 
@@ -146,15 +147,68 @@
     tip.style.top = (above ? r.top - tip.offsetHeight - 8 : r.bottom + 8) + 'px';
   });
   addEventListener('mouseout', e => { if (e.target.closest('[data-tip]')) tip.style.opacity = 0; });
-  DRAWER_BACKDROP.onclick = closeDrawer;
+  // 작업 이력 패널
+  const actDrawer = $('#activityDrawer');
+  let activityReturnFocus = null;
+  const openActivityDrawer = async () => {
+    activityReturnFocus = document.activeElement;
+    renderActivityLogs();
+    actDrawer.classList.add('open');
+    actDrawer.setAttribute('aria-hidden', 'false');
+    DRAWER_BACKDROP.classList.add('open');
+    DRAWER_BACKDROP.setAttribute('aria-hidden', 'false');
+    $('#activityDrawerX').focus();
+    await refreshActivityLogsFromSheet({ silent: true });
+  };
+  const closeActivityDrawer = () => {
+    const wasOpen = actDrawer.classList.contains('open');
+    actDrawer.classList.remove('open');
+    actDrawer.setAttribute('aria-hidden', 'true');
+    if (!DRAWER.classList.contains('open')) {
+      DRAWER_BACKDROP.classList.remove('open');
+      DRAWER_BACKDROP.setAttribute('aria-hidden', 'true');
+    }
+    if (wasOpen && activityReturnFocus && document.contains(activityReturnFocus)) activityReturnFocus.focus();
+  };
+  $('#btnActivityLog').onclick = openActivityDrawer;
+  $('#activityDrawerX').onclick = closeActivityDrawer;
+  $('#btnClearLog').onclick = async () => {
+    const button = $('#btnClearLog');
+    button.disabled = true;
+    button.textContent = '불러오는 중…';
+    await refreshActivityLogsFromSheet();
+    button.disabled = false;
+    button.textContent = '새로고침';
+  };
+  $('#btnExportLog').onclick = () => {
+    const logs = getActivityLogs();
+    if (!logs.length) { toast('다운로드할 작업 이력이 없습니다.'); return; }
+    csvDownload('작업이력_로그.csv', [
+      ['시각', '작업구분', '대상', '상세내용', '작업자', '입력경로', '성공여부'],
+      ...logs.map(l => [l.time, l.type, l.target, l.detail, l.actor || '', l.source || '', l.success === false ? '실패' : '성공'])
+    ]);
+  };
+  addEventListener('storage', event => {
+    if (event.key === LOG_KEY) renderActivityLogs();
+  });
+
+  DRAWER_BACKDROP.onclick = () => {
+    closeDrawer();
+    closeActivityDrawer();
+  };
   addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
     if (SYNC_DIALOG.classList.contains('open')) closeSyncDialog();
     else if (COMPANY_DIALOG.classList.contains('open')) closeCompanyDialog();
-    else closeDrawer();
+    else {
+      closeDrawer();
+      closeActivityDrawer();
+    }
   });
 
   // 연결된 주소가 있으면 저장 데이터를 먼저 보여준 뒤 백그라운드에서 최신화
   const endpoint = localStorage.getItem(SHEET_ENDPOINT_KEY) || DEFAULT_SHEET_URL;
-  syncFromSheet(endpoint, { silent: true, saveEndpoint: true });
+  syncFromSheet(endpoint, { silent: true, saveEndpoint: true, reason: 'boot' });
+  initAutoSync();
+  renderActivityLogs();
 })();

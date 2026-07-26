@@ -207,6 +207,10 @@ const SRC_LEGACY = {
   start: 6,        // G 컨설팅 시작
   end: 7,          // H 종료기한
   employeeCount: 9,// J 근로자수 (GViz가 숫자 열의 텍스트 헤더를 누락할 때 쓰는 안전한 기본값)
+  workplaceNumber: 10, // K 앞쪽 사업장 관리번호
+  companyAddress: 11,  // L 주소
+  agencyBranch: 12,    // M 공단지사
+  hrd4uId: 14,         // O HRD4U
   contactName: 18, // S 담당자
   contactTitle: 19,// T 직급
   contactPhone: 20,// U 전화번호
@@ -229,29 +233,32 @@ const SRC_DASHBOARD = {
 };
 
 const SOURCE_EXTRA_HEADERS = {
-  employeeCount: '근로자수',
-  workplaceNumber: '사업장 관리번호',
-  companyAddress: '주소',
-  agencyBranch: '공단지사',
-  hrd4uId: 'HRD4U ID',
-  visitOwner: '담당',
-  visitDate: '일자',
-  visitTime: '시간',
-  consult1Date: '1차 컨설팅일',
-  consult1Time: '1차 시간',
-  consult1Visit: '1차 방문',
-  consult1Owner: '1차 담당',
-  consult2Date: '2차 컨설팅일',
-  consult2Time: '2차 시간',
-  consult2Visit: '2차 방문',
-  consult2Owner: '2차 담당',
+  employeeCount: ['근로자수'],
+  // 공백 유무가 다른 중복 헤더가 있으면 시트의 가장 앞쪽 열을 사용한다.
+  workplaceNumber: ['사업장 관리번호', '사업장관리번호'],
+  companyAddress: ['주소'],
+  agencyBranch: ['공단지사'],
+  // «HRD4U ID»는 의도적으로 후보에 넣지 않는다.
+  hrd4uId: ['HRD4U'],
+  visitOwner: ['담당'],
+  visitDate: ['일자'],
+  visitTime: ['시간'],
+  consult1Date: ['1차 컨설팅일'],
+  consult1Time: ['1차 시간'],
+  consult1Visit: ['1차 방문'],
+  consult1Owner: ['1차 담당'],
+  consult2Date: ['2차 컨설팅일'],
+  consult2Time: ['2차 시간'],
+  consult2Visit: ['2차 방문'],
+  consult2Owner: ['2차 담당'],
 };
 function withSourceExtraColumns(base, header) {
   const columns = { ...base };
   if (!header) return columns;
   const cells = header.map(v => String(v || '').trim());
-  Object.entries(SOURCE_EXTRA_HEADERS).forEach(([key, label]) => {
-    const index = cells.indexOf(label);
+  Object.entries(SOURCE_EXTRA_HEADERS).forEach(([key, labels]) => {
+    // 셀 순서대로 찾으므로 같은 의미의 헤더가 여러 개면 항상 앞쪽 열이 선택된다.
+    const index = cells.findIndex(cell => labels.includes(cell));
     if (index >= 0) columns[key] = index;
   });
   return columns;
@@ -529,4 +536,110 @@ function card(title, sub) {
 function meter(n, total) {
   const pct = Math.round(n / total * 100);
   return `<div class="meter"><div class="t"><div class="f" style="width:${pct}%"></div></div><div class="n">${n}/${total}</div></div>`;
+}
+
+/* ============================================================
+   작업 이력 (Audit Activity Log) 관리
+   ============================================================ */
+const LOG_KEY = APP_STORAGE_KEY + ':activityLogs';
+let sheetActivityLogs = [];
+
+function getLocalActivityLogs() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
+    return Array.isArray(saved) ? saved : [];
+  } catch { return []; }
+}
+
+function setSheetActivityLogs(logs) {
+  sheetActivityLogs = (Array.isArray(logs) ? logs : []).map(log => ({
+    id: log.requestId || `sheet_${log.time}_${log.target}_${log.type}`,
+    time: log.time || '',
+    type: log.type || 'SHEET_EDIT',
+    target: log.target || '공통',
+    detail: log.detail || log.error || '',
+    tone: log.success === false ? 'bad' : 'info',
+    source: log.source || '시트',
+    actor: log.actor || '',
+    success: log.success !== false
+  }));
+  renderActivityLogs();
+}
+
+function getActivityLogs() {
+  const merged = [...getLocalActivityLogs(), ...sheetActivityLogs];
+  const unique = new Map();
+  merged.forEach(log => {
+    const key = log.id || `${log.time}\u0000${log.type}\u0000${log.target}\u0000${log.detail}`;
+    if (!unique.has(key)) unique.set(key, log);
+  });
+  return [...unique.values()]
+    .sort((a, b) => String(b.time || '').localeCompare(String(a.time || '')))
+    .slice(0, 100);
+}
+
+function addLog(actionType, targetName, detailText, tone = 'info', options) {
+  const logs = getLocalActivityLogs();
+  const now = new Date();
+  const opts = options || {};
+  const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const entry = {
+    id: opts.requestId || 'log_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+    time: `${dateStr} ${timeStr}`,
+    type: actionType,
+    target: targetName || '공통',
+    detail: detailText || '',
+    tone: tone,
+    source: opts.source || '웹',
+    success: opts.success !== false
+  };
+  logs.unshift(entry);
+  if (logs.length > 100) logs.pop(); // 최근 100건 보관
+  try { localStorage.setItem(LOG_KEY, JSON.stringify(logs)); }
+  catch { toast('작업 로그를 브라우저에 저장하지 못했습니다.'); }
+  renderActivityLogs();
+  return entry;
+}
+
+function clearActivityLogs() {
+  try { localStorage.removeItem(LOG_KEY); } catch {}
+  renderActivityLogs();
+  toast('이 브라우저의 임시 작업 이력을 비웠습니다. 시트 감사 로그는 유지됩니다.');
+}
+
+function renderActivityLogs() {
+  const container = $('#activityLogList');
+  const countEl = $('#activityLogCount');
+  const btnEl = $('#btnActivityLog');
+  const logs = getActivityLogs();
+  if (btnEl) btnEl.textContent = `📋 작업 로그 (${logs.length})`;
+  if (!container) return;
+  if (countEl) countEl.textContent = `기록 ${logs.length}건`;
+  if (!logs.length) {
+    container.innerHTML = '<div class="empty" style="text-align:center;padding:24px 0;">아직 기록된 작업 이력이 없습니다.</div>';
+    return;
+  }
+  container.innerHTML = logs.map(log => {
+    const toneClass = log.tone ? ` is-${log.tone}` : '';
+    const typeLabels = {
+      SYNC: '동기화', ADD: '기업 추가', EDIT: '정보 수정',
+      CANCEL: '신청취소', RESTORE: '취소 복원', DOC: '서류 변경',
+      COACH_DOC: '코치 서류', EXTEND: '기한 연장', SETTING: '설정 변경'
+    };
+    const badgeType = typeLabels[log.type] || log.type || '기타';
+    return `
+      <div class="activity-log-item${toneClass}" style="padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);font-size:12.5px;display:flex;flex-direction:column;gap:4px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span class="badge" style="font-size:10.5px;padding:2px 7px;">${esc(badgeType)}</span>
+            <strong style="color:var(--ink-1);font-size:13px;">${esc(log.target)}</strong>
+          </div>
+          <span style="font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums;">${esc(log.time)}</span>
+        </div>
+        <div style="color:var(--ink-2);font-size:12px;word-break:break-all;line-height:1.4;">${esc(log.detail)}</div>
+        ${(log.actor || log.source) ? `<div style="color:var(--ink-3);font-size:10.5px;">${esc([log.actor, log.source].filter(Boolean).join(' · '))}</div>` : ''}
+      </div>
+    `;
+  }).join('');
 }

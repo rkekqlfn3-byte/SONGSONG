@@ -359,7 +359,20 @@ async function commitDocCell(td, company, def, entered, opts) {
   docSaving.add(lock);
 
   try {
-    await requestSheetWrite(writeEndpoint(), 'updateDocs', { companyName: company.name, docs });
+    const beforeText = filled(rollback[def.k]) ? docCellText(rollback[def.k]) : '미제출';
+    const afterText = sent ? docCellText(localDocValue(def.k, sent)) : '미제출';
+    await requestSheetWrite(writeEndpoint(), 'updateDocs', {
+      companyName: company.name,
+      docs,
+      _audit: {
+        type: 'DOC',
+        target: company.name,
+        detail: `${def.label}: ${beforeText} → ${afterText}`,
+        tone: 'info',
+        before: { [def.k]: beforeText },
+        after: { [def.k]: afterText }
+      }
+    });
     if (td) td.classList.remove('saving');
     /*
      * 되돌리기를 띄우는 기준 — 되돌릴 «잃은 값»이 있을 때만.
@@ -424,7 +437,20 @@ async function commitCoachDoc(td, coach, def, sent, opts) {
   docSaving.add(lock);
 
   try {
-    await requestSheetWrite(writeEndpoint(), 'updateCoachDocs', { coachName: coach.name, docs: { [def.k]: sent } });
+    const beforeText = filled(rollbackCoach) ? docCellText(rollbackCoach) : '미제출';
+    const afterText = sent ? docCellText(local) : '미제출';
+    await requestSheetWrite(writeEndpoint(), 'updateCoachDocs', {
+      coachName: coach.name,
+      docs: { [def.k]: sent },
+      _audit: {
+        type: 'COACH_DOC',
+        target: coach.name,
+        detail: `${def.label}: ${beforeText} → ${afterText} · 담당 ${mine.length}개사 반영`,
+        tone: 'warn',
+        before: { [def.k]: beforeText },
+        after: { [def.k]: afterText, affectedCompanies: mine.length }
+      }
+    });
     if (td) td.classList.remove('saving');
     toast(`${coach.name} 코치 공통 · ${def.label} — 담당 ${mine.length}곳 반영됨`);
     return true;
@@ -547,10 +573,10 @@ function openCompany(c, docsEditMode) {
   openDrawer(esc(c.name), `${badge(c.status)} <span class="dim">담당 ${esc(c.owner || '미배정')}</span>`, `
     <div class="sect"><h4>사업장 정보</h4><dl class="kv">
       <dt>근로자 수</dt><dd>${workplace.employeeCount ? `${esc(workplace.employeeCount)}명` : '<span class="dim">—</span>'}</dd>
-      <dt>관리번호</dt><dd>${copyLine(workplace.managementNumber, '사업장 관리번호')}</dd>
+      <dt>관리번호</dt><dd>${copyLine(workplace.managementNumber, '사업장관리번호')}</dd>
       <dt>주소</dt><dd>${esc(workplace.address || '—')}</dd>
       <dt>공단지사</dt><dd>${esc(workplace.agencyBranch || '—')}</dd>
-      <dt>HRD4U ID</dt><dd>${copyLine(workplace.hrd4uId, 'HRD4U ID')}</dd>
+      <dt>HRD4U</dt><dd>${copyLine(workplace.hrd4uId, 'HRD4U')}</dd>
     </dl></div>
     <div class="sect"><h4>기업 담당자</h4><dl class="kv">
       <dt>성명</dt><dd>${esc(c.contact.name || '—')} <span class="dim">${esc(c.contact.title)}</span></dd>
@@ -630,7 +656,11 @@ function openCompany(c, docsEditMode) {
     }
     $('#extensionCheck', d).onchange = e => {
       const enabled = e.target.checked;
-      setCompanyExtension(c, enabled);
+      if (!setCompanyExtension(c, enabled)) {
+        e.target.checked = false;
+        return;
+      }
+      if (typeof renderActivityLogs === 'function') renderActivityLogs();
       render();
       openCompany(c, docsEditMode);
       requestAnimationFrame(() => $('#extensionCheck', DRAWER)?.focus());

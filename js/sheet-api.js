@@ -1,7 +1,7 @@
 /* ============================================================
    12. 데이터 로드 / 갱신
    ============================================================ */
-const LS_KEY = 'airoadmap-dashboard-v1';
+const LS_KEY = APP_STORAGE_KEY;
 const SHEET_ENDPOINT_KEY = LS_KEY + ':sheetEndpoint';
 const WRITE_ENDPOINT_KEY = LS_KEY + ':writeEndpoint';
 const BASE_YEAR_KEY = LS_KEY + ':baseYear';
@@ -32,12 +32,23 @@ function updateCompanyDeadline(company) {
   company.dday = ACTIVE.has(company.status) ? daysFromToday(company.effectiveEnd) : null;
 }
 function setCompanyExtension(company, enabled) {
-  if (!company.end) return;
+  if (!company || !company.end) {
+    if (company && twoWeekExtensions[company.name]) {
+      delete twoWeekExtensions[company.name];
+      try { localStorage.setItem(EXTENSION_KEY, JSON.stringify(twoWeekExtensions)); } catch {}
+    }
+    toast('종료기한을 먼저 입력해야 2주 연장을 적용할 수 있습니다.');
+    return false;
+  }
   if (enabled) twoWeekExtensions[company.name] = true;
   else delete twoWeekExtensions[company.name];
   try { localStorage.setItem(EXTENSION_KEY, JSON.stringify(twoWeekExtensions)); }
   catch { toast('2주 연장 상태를 저장하지 못했습니다. 이번 화면에만 적용됩니다.'); }
   updateCompanyDeadline(company);
+  if (typeof addLog === 'function') {
+    addLog('EXTEND', company.name, enabled ? '종료 기한 2주 연장 적용 (+14일)' : '2주 연장 해제 (기존 기한 복원)', enabled ? 'warn' : 'info');
+  }
+  return true;
 }
 
 /** 서류·일정 입력에 붙는 기준 연도 — 상단에서 한 번 정하면 계속 유지된다 */
@@ -188,8 +199,33 @@ function setSyncBusy(busy) {
   $('#syncTest').disabled = busy;
   $('#syncSave').disabled = busy;
 }
+let syncInFlightPromise = null;
+
+function syncBlockedByEditing() {
+  const documentCellOpen = typeof docEditing !== 'undefined' && !!docEditing;
+  const companyFormOpen = typeof COMPANY_DIALOG !== 'undefined' && COMPANY_DIALOG.classList.contains('open');
+  return documentCellOpen || companyFormOpen;
+}
+
 async function syncFromSheet(endpoint, options) {
   const opts = options || {};
+  if (!opts.force && syncBlockedByEditing()) {
+    if (!opts.silent) toast('입력 중인 내용을 저장하거나 취소한 뒤 동기화해주세요.');
+    return false;
+  }
+  if (syncInFlightPromise) {
+    if (!opts.silent && opts.inDialog) setSyncState('이미 진행 중인 동기화를 기다리고 있습니다…', '');
+    return syncInFlightPromise;
+  }
+  syncInFlightPromise = syncFromSheetOnce(endpoint, opts);
+  try {
+    return await syncInFlightPromise;
+  } finally {
+    syncInFlightPromise = null;
+  }
+}
+
+async function syncFromSheetOnce(endpoint, opts) {
   let clean;
   try { clean = normalizeEndpoint(endpoint); }
   catch (e) {
@@ -205,31 +241,77 @@ async function syncFromSheet(endpoint, options) {
       return true;
     }
     if (opts.saveEndpoint) localStorage.setItem(SHEET_ENDPOINT_KEY, clean);
-    applyData(raw, 'Google Sheet · 자동 동기화', true);
+    const sourceLabel = opts.reason === 'manual'
+      ? 'Google Sheet · 수동 동기화'
+      : opts.reason === 'after-write'
+        ? 'Google Sheet · 저장 후 동기화'
+        : 'Google Sheet · 자동 동기화';
+    applyData(raw, sourceLabel, true);
     if (!opts.silent) toast('Google Sheet 최신 데이터로 동기화했습니다.');
     if (opts.inDialog) setSyncState('동기화 완료 — 연결 주소를 저장했습니다.', 'ok');
+    if (!opts.silent && typeof addLog === 'function') {
+      addLog('SYNC', 'Google Sheet', `시트 4개 탭 수동 동기화 완료 (${raw.sheets ? Object.keys(raw.sheets).length : 0}개 탭)`, 'ok');
+    }
     return true;
   } catch (e) {
     console.error(e);
     const msg = '동기화 실패 — ' + (e.message || '데이터를 불러오지 못했습니다.');
     if (opts.inDialog) setSyncState(msg, 'bad');
     else if (!opts.silent) toast(msg + ' 기존 데이터 유지');
+    if (!opts.silent && typeof addLog === 'function') addLog('SYNC', 'Google Sheet', msg, 'bad', { success: false });
     return false;
   } finally {
     setSyncBusy(false);
   }
 }
 
+function makeRequestId(action) {
+  return `${action || 'request'}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function writeAuditMeta(action, payload) {
+  const sent = payload || {};
+  if (sent._audit) return sent._audit;
+  if (action === 'addCompany') {
+    return { type: 'ADD', target: sent.companyName, detail: '새 기업 등록', tone: 'ok' };
+  }
+  if (action === 'updateCompany') {
+    return { type: 'EDIT', target: sent.companyName || sent.originalCompanyName, detail: '기업 정보 수정', tone: 'info' };
+  }
+  if (action === 'updateDocs') {
+    return { type: 'DOC', target: sent.companyName, detail: '기업 서류 변경', tone: 'info' };
+  }
+  if (action === 'updateCoachDocs') {
+    return { type: 'COACH_DOC', target: sent.coachName, detail: '코치 공통 서류 변경', tone: 'warn' };
+  }
+  return null;
+}
+
 function requestSheetWrite(endpoint, action, payload) {
   const clean = normalizeWriteEndpoint(endpoint);
   const callback = `__sheetWrite_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const requestId = makeRequestId(action);
+  const sentPayload = { ...(payload || {}), _requestId: requestId, _source: 'web' };
+  const audit = writeAuditMeta(action, sentPayload);
   const url = new URL(clean);
   url.searchParams.set('action', action);
-  url.searchParams.set('payload', JSON.stringify(payload || {}));
+  url.searchParams.set('payload', JSON.stringify(sentPayload));
+  url.searchParams.set('requestId', requestId);
   url.searchParams.set('callback', callback);
   url.searchParams.set('_', Date.now());
   return new Promise((resolve, reject) => {
     const script = el('script');
+    let auditFinished = false;
+    const finishAudit = (success, message) => {
+      if (auditFinished || !audit || typeof addLog !== 'function') return;
+      auditFinished = true;
+      const detail = success ? audit.detail : `${audit.detail || '저장 요청'} 실패 — ${message}`;
+      addLog(audit.type || 'EDIT', audit.target || '공통', detail, success ? (audit.tone || 'info') : 'bad', {
+        requestId,
+        source: '웹',
+        success
+      });
+    };
     const clear = () => {
       clearTimeout(timer);
       script.remove();
@@ -237,23 +319,42 @@ function requestSheetWrite(endpoint, action, payload) {
     };
     const timer = setTimeout(() => {
       clear();
+      finishAudit(false, '저장 요청 시간이 초과되었습니다.');
       reject(new Error('저장 요청 시간이 초과되었습니다.'));
     }, 25000);
     window[callback] = response => {
       clear();
       if (!response || response.ok !== true) {
-        reject(new Error((response && response.error) || '시트 저장에 실패했습니다.'));
+        const message = (response && response.error) || '시트 저장에 실패했습니다.';
+        finishAudit(false, message);
+        reject(new Error(message));
         return;
       }
-      resolve(response);
+      finishAudit(true, '');
+      resolve({ ...response, requestId });
     };
     script.onerror = () => {
       clear();
+      finishAudit(false, '저장용 웹 앱에 연결하지 못했습니다.');
       reject(new Error('저장용 웹 앱에 연결하지 못했습니다.'));
     };
     script.src = url.href;
     document.head.appendChild(script);
   });
+}
+
+async function refreshActivityLogsFromSheet(options) {
+  const opts = options || {};
+  try {
+    const response = await requestSheetWrite(writeEndpoint(), 'getAuditLogs', { limit: 100 });
+    if (typeof setSheetActivityLogs === 'function') setSheetActivityLogs(response.logs || []);
+    if (!opts.silent) toast(`시트 감사 로그 ${response.logs ? response.logs.length : 0}건을 불러왔습니다.`);
+    return true;
+  } catch (error) {
+    console.error(error);
+    if (!opts.silent) toast('시트 감사 로그를 불러오지 못했습니다. Apps Script 새 버전을 배포했는지 확인해주세요.');
+    return false;
+  }
 }
 
 /** 비상용 수동 갱신 — 인터넷이 막혔을 때 내려받은 .xlsx로 화면을 채운다 */
@@ -266,9 +367,53 @@ async function loadFile(file) {
     const raw = { generatedAt: iso(TODAY), sheets };
     applyData(raw, `직접 갱신 · ${file.name}`, true);
     toast('최신 데이터로 갱신했습니다.');
+    if (typeof addLog === 'function') addLog('SYNC', file.name, 'Excel 파일로 화면 데이터 직접 갱신', 'info');
   } catch (e) {
     console.error(e);
     toast('갱신 실패 — ' + (e.message || '파일을 읽을 수 없습니다') + ' (기존 데이터 유지)');
   }
 }
 
+/* ============================================================
+   자동 주기 동기화 (Auto Sync)
+   ============================================================ */
+const AUTO_SYNC_KEY = LS_KEY + ':autoSyncInterval';
+let autoSyncTimerId = null;
+let autoSyncIntervalMs = 0;
+
+function queueAutoSync() {
+  if (!autoSyncIntervalMs) return;
+  autoSyncTimerId = setTimeout(async () => {
+    autoSyncTimerId = null;
+    if (!document.hidden && !syncBlockedByEditing()) {
+      const endpoint = localStorage.getItem(SHEET_ENDPOINT_KEY) || DEFAULT_SHEET_URL;
+      await syncFromSheet(endpoint, { silent: true, reason: 'automatic' });
+    }
+    queueAutoSync();
+  }, autoSyncIntervalMs);
+}
+
+function setAutoSyncInterval(ms) {
+  const interval = parseInt(ms, 10) || 0;
+  try { localStorage.setItem(AUTO_SYNC_KEY, String(interval)); } catch {}
+  if (autoSyncTimerId) { clearTimeout(autoSyncTimerId); autoSyncTimerId = null; }
+  autoSyncIntervalMs = interval;
+  if (interval > 0) queueAutoSync();
+}
+
+function initAutoSync() {
+  const saved = parseInt(localStorage.getItem(AUTO_SYNC_KEY), 10) || 0;
+  const select = $('#autoSyncInterval');
+  if (select) {
+    select.value = String(saved);
+    select.onchange = e => {
+      const val = parseInt(e.target.value, 10) || 0;
+      setAutoSyncInterval(val);
+      const detail = val > 0 ? `자동 동기화 ${val / 1000}초 주기로 변경` : '자동 동기화 끄기';
+      if (typeof addLog === 'function') addLog('SETTING', '자동 동기화', detail, 'info');
+      if (val > 0) toast(`자동 동기화가 설정되었습니다 (${val / 1000}초 주기)`);
+      else toast('자동 동기화가 꺼졌습니다.');
+    };
+  }
+  if (saved > 0) setAutoSyncInterval(saved);
+}

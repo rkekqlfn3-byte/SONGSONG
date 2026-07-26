@@ -26,7 +26,7 @@
  *   ?action=updateCoachDocs&payload=... 코치 공통 서식8·9·10·통장사본 수정
  */
 
-const VERSION = '2026-07-26k';
+const VERSION = '2026-07-26-headers1';
 
 const SPREADSHEET_ID = '1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q';
 /*
@@ -48,6 +48,11 @@ function sourceSheet_(book) {
 }
 const COACH_SHEET = '훈련코치';
 const DOCUMENT_SHEET = '서류';
+const AUDIT_SHEET = '작업로그';
+const AUDIT_HEADERS = [
+  '일시', '요청ID', '작업자', '작업종류', '대상', '상세',
+  '변경전', '변경후', '입력경로', '성공여부', '오류'
+];
 
 /** 작성 탭 열 번호(1부터). 대시보드 입력 칸과 1:1로 맞춘다 */
 const SOURCE_COLUMNS_DASHBOARD = {
@@ -73,6 +78,11 @@ const SOURCE_COLUMNS_LEGACY = {
   coachPhone: 6,     // F 연락처
   startDate: 7,      // G 컨설팅 시작
   endDate: 8,        // H 종료기한
+  employeeCount: 10, // J 근로자수
+  workplaceNumber: 11, // K 앞쪽 사업장 관리번호
+  companyAddress: 12,  // L 주소
+  agencyBranch: 13,    // M 공단지사
+  hrd4uId: 15,         // O HRD4U
   contactName: 19,   // S 기업 담당자
   contactTitle: 20,  // T 직급
   contactPhone: 21,  // U 전화번호
@@ -85,11 +95,13 @@ const DOCUMENT_FIRST_ROW = 4;
 
 /** 기업 원본 탭에 추가되는 사업장 기본정보 열. 같은 헤더가 이미 있으면 그 열을 그대로 사용한다. */
 const COMPANY_INFO_COLUMNS = [
-  { key: 'employeeCount',    header: '근로자수',        type: 'number' },
-  { key: 'workplaceNumber',  header: '사업장 관리번호', type: 'text' },
-  { key: 'companyAddress',   header: '주소',            type: 'text' },
-  { key: 'agencyBranch',     header: '공단지사',        type: 'text' },
-  { key: 'hrd4uId',          header: 'HRD4U ID',        type: 'text' }
+  { key: 'employeeCount',    header: '근로자수',          type: 'number' },
+  // 공백 유무가 다른 기존 헤더를 모두 인정하되, 앞쪽 열을 우선 사용한다.
+  { key: 'workplaceNumber',  header: '사업장 관리번호',   aliases: ['사업장 관리번호', '사업장관리번호'], type: 'text' },
+  { key: 'companyAddress',   header: '주소',              type: 'text' },
+  { key: 'agencyBranch',     header: '공단지사',          type: 'text' },
+  // «HRD4U ID»가 아니라 정확히 «HRD4U»인 열만 사용한다.
+  { key: 'hrd4uId',          header: 'HRD4U',             aliases: ['HRD4U'], type: 'text' }
 ];
 
 /** 기업 원본 탭에 추가되는 1·2차 컨설팅 일정 열. 기존 열은 건드리지 않고 마지막 열 뒤에 붙인다. */
@@ -147,31 +159,43 @@ const FORMULAS = [
 ];
 
 function doGet(e) {
+  const action = e && e.parameter ? e.parameter.action : '';
+  let payload = {};
   try {
-    const action = e && e.parameter ? e.parameter.action : '';
     if (action === 'ping') return response_({ ok: true, message: 'ready', version: VERSION }, e);
     if (action === 'diag') return response_({ ok: true, version: VERSION, sheets: diag_() }, e);
-    if (action === 'setupFormulas') return response_({ ok: true, version: VERSION, applied: setupFormulas_() }, e);
+    if (action === 'getAuditLogs') {
+      const requested = JSON.parse((e.parameter && e.parameter.payload) || '{}');
+      const limit = Math.min(Math.max(parseInt(requested.limit || e.parameter.limit, 10) || 100, 1), 500);
+      return response_({ ok: true, version: VERSION, logs: getAuditLogs_(limit) }, e);
+    }
 
-    const payload = JSON.parse((e.parameter && e.parameter.payload) || '{}');
-
-    if (action === 'updateDocs') {
+    payload = JSON.parse((e.parameter && e.parameter.payload) || '{}');
+    let result;
+    if (action === 'setupFormulas') {
+      result = { applied: setupFormulas_() };
+    } else if (action === 'updateDocs') {
       const updated = updateDocs_(payload);
-      return response_({ ok: true, company: updated.company, docRow: updated.docRow, wrote: updated.wrote }, e);
-    }
-    if (action === 'updateCoachDocs') {
+      result = { company: updated.company, docRow: updated.docRow, wrote: updated.wrote };
+    } else if (action === 'updateCoachDocs') {
       const updated = updateCoachDocs_(payload);
-      return response_({ ok: true, coach: updated.coach, coachRow: updated.coachRow, wrote: updated.wrote }, e);
-    }
-    if (action === 'updateCompany') {
+      result = { coach: updated.coach, coachRow: updated.coachRow, wrote: updated.wrote };
+    } else if (action === 'updateCompany') {
       const updated = updateCompany_(payload);
-      return response_({ ok: true, company: updated.company, row: updated.row, docRow: updated.docRow }, e);
+      result = { company: updated.company, row: updated.row, docRow: updated.docRow };
+    } else if (action === 'addCompany') {
+      const added = addCompany_(payload);
+      result = { company: added.company, row: added.row, docRow: added.docRow };
+    } else {
+      throw new Error('지원하지 않는 요청입니다.');
     }
-    if (action !== 'addCompany') throw new Error('지원하지 않는 요청입니다.');
 
-    const result = addCompany_(payload);
-    return response_({ ok: true, company: result.company, row: result.row, docRow: result.docRow }, e);
+    const auditLogged = appendAuditLog_(auditRecord_(action, payload, result, true, ''));
+    return response_(Object.assign({ ok: true, version: VERSION, auditLogged: auditLogged }, result), e);
   } catch (error) {
+    if (action && action !== 'ping' && action !== 'diag' && action !== 'getAuditLogs') {
+      appendAuditLog_(auditRecord_(action, payload, null, false, error && error.message ? error.message : String(error)));
+    }
     return response_({ ok: false, error: error && error.message ? error.message : String(error) }, e);
   }
 }
@@ -271,10 +295,12 @@ function sourceColumns_(sheet) {
       visitTime: '시간'
     };
     COMPANY_INFO_COLUMNS.concat(CONSULTATION_COLUMNS).forEach(function (def) {
-      extraHeaders[def.key] = def.header;
+      extraHeaders[def.key] = def.aliases || [def.header];
     });
     Object.keys(extraHeaders).forEach(function (key) {
-      const index = sourceHeader.indexOf(extraHeaders[key]);
+      const labels = Array.isArray(extraHeaders[key]) ? extraHeaders[key] : [extraHeaders[key]];
+      // 행의 왼쪽부터 검사하여 중복 헤더가 있으면 가장 앞쪽 열을 선택한다.
+      const index = sourceHeader.findIndex(function (cell) { return labels.indexOf(cell) >= 0; });
       if (index >= 0) columns[key] = index + 1;
     });
   }
@@ -286,7 +312,10 @@ function ensureSourceExtraColumns_(sheet, definitions, groupTitle) {
   const width = Math.max(1, sheet.getLastColumn());
   const headers = sheet.getRange(SOURCE_HEADER_ROW, 1, 1, width).getDisplayValues()[0]
     .map(function (v) { return String(v || '').trim(); });
-  const missing = definitions.filter(function (def) { return headers.indexOf(def.header) < 0; });
+  const missing = definitions.filter(function (def) {
+    const labels = def.aliases || [def.header];
+    return !headers.some(function (cell) { return labels.indexOf(cell) >= 0; });
+  });
   if (!missing.length) return;
 
   const requiredLastColumn = width + missing.length;
@@ -662,6 +691,137 @@ function parseDate_(value) {
 function cleanText_(value) {
   const text = String(value == null ? '' : value).trim();
   return /^[=+@]/.test(text) ? "'" + text : text;
+}
+
+function auditJson_(value) {
+  if (value == null || value === '') return '';
+  let text;
+  try { text = typeof value === 'string' ? value : JSON.stringify(value); }
+  catch (e) { text = String(value); }
+  return text.length > 45000 ? text.slice(0, 45000) + '…' : text;
+}
+
+function auditPayloadAfter_(payload) {
+  const out = {};
+  Object.keys(payload || {}).forEach(function (key) {
+    if (key.charAt(0) === '_') return;
+    out[key] = payload[key];
+  });
+  return out;
+}
+
+function auditRecord_(action, payload, result, success, error) {
+  const audit = payload && payload._audit ? payload._audit : {};
+  const target = audit.target || payload.companyName || payload.originalCompanyName || payload.coachName || '공통';
+  let actor = audit.actor || payload.owner || '';
+  try { actor = Session.getActiveUser().getEmail() || actor; } catch (e) {}
+  return {
+    requestId: payload._requestId || '',
+    actor: actor || '웹 사용자',
+    action: audit.type || action || 'UNKNOWN',
+    target: target,
+    detail: audit.detail || '',
+    before: Object.prototype.hasOwnProperty.call(audit, 'before') ? audit.before : '',
+    after: Object.prototype.hasOwnProperty.call(audit, 'after') ? audit.after : (success ? auditPayloadAfter_(payload) : ''),
+    source: payload._source || 'web',
+    success: !!success,
+    error: error || '',
+    result: result || null
+  };
+}
+
+function ensureAuditSheet_(book) {
+  let sheet = book.getSheetByName(AUDIT_SHEET);
+  if (!sheet) sheet = book.insertSheet(AUDIT_SHEET);
+  const current = sheet.getRange(1, 1, 1, AUDIT_HEADERS.length).getDisplayValues()[0];
+  const valid = AUDIT_HEADERS.every(function (header, index) { return current[index] === header; });
+  if (!valid) {
+    sheet.getRange(1, 1, 1, AUDIT_HEADERS.length).setValues([AUDIT_HEADERS]);
+    sheet.setFrozenRows(1);
+    sheet.getRange(1, 1, 1, AUDIT_HEADERS.length).setFontWeight('bold');
+  }
+  return sheet;
+}
+
+function appendAuditLog_(record) {
+  try {
+    const book = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ensureAuditSheet_(book);
+    const zone = book.getSpreadsheetTimeZone() || Session.getScriptTimeZone() || 'Asia/Seoul';
+    sheet.appendRow([
+      Utilities.formatDate(new Date(), zone, 'yyyy-MM-dd HH:mm:ss'),
+      cleanText_(record.requestId),
+      cleanText_(record.actor),
+      cleanText_(record.action),
+      cleanText_(record.target),
+      cleanText_(record.detail),
+      auditJson_(record.before),
+      auditJson_(record.after),
+      cleanText_(record.source),
+      record.success ? '성공' : '실패',
+      cleanText_(record.error)
+    ]);
+    return true;
+  } catch (error) {
+    console.error('감사 로그 저장 실패', error);
+    return false;
+  }
+}
+
+function getAuditLogs_(limit) {
+  const book = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = book.getSheetByName(AUDIT_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const count = Math.min(limit || 100, sheet.getLastRow() - 1);
+  const start = sheet.getLastRow() - count + 1;
+  const rows = sheet.getRange(start, 1, count, AUDIT_HEADERS.length).getDisplayValues();
+  return rows.reverse().map(function (row) {
+    return {
+      time: row[0], requestId: row[1], actor: row[2], type: row[3],
+      target: row[4], detail: row[5], before: row[6], after: row[7],
+      source: row[8], success: row[9] === '성공', error: row[10]
+    };
+  });
+}
+
+/**
+ * 시트에서 사람이 직접 바꾼 셀도 작업로그에 남긴다.
+ * Apps Script 편집기에서 installAuditTrigger를 한 번 직접 실행해야 한다.
+ */
+function installAuditTrigger() {
+  const book = SpreadsheetApp.openById(SPREADSHEET_ID);
+  ScriptApp.getProjectTriggers().forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === 'auditSheetEdit') ScriptApp.deleteTrigger(trigger);
+  });
+  ScriptApp.newTrigger('auditSheetEdit').forSpreadsheet(book).onEdit().create();
+  ensureAuditSheet_(book);
+  return 'auditSheetEdit 설치 완료';
+}
+
+function auditSheetEdit(e) {
+  if (!e || !e.range) return;
+  const sheet = e.range.getSheet();
+  const sheetName = sheet.getName();
+  if (sheetName === AUDIT_SHEET) return;
+  if (SOURCE_SHEET_NAMES.indexOf(sheetName) < 0 && sheetName !== COACH_SHEET && sheetName !== DOCUMENT_SHEET) return;
+
+  let actor = '';
+  try { actor = Session.getActiveUser().getEmail(); } catch (error) {}
+  const after = e.range.getNumRows() === 1 && e.range.getNumColumns() === 1
+    ? e.range.getDisplayValue()
+    : e.range.getDisplayValues();
+  appendAuditLog_({
+    requestId: 'sheet_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+    actor: actor || '시트 사용자',
+    action: 'SHEET_EDIT',
+    target: sheetName + '!' + e.range.getA1Notation(),
+    detail: e.range.getNumRows() === 1 && e.range.getNumColumns() === 1 ? '셀 직접 수정' : '범위 직접 수정',
+    before: Object.prototype.hasOwnProperty.call(e, 'oldValue') ? e.oldValue : '',
+    after: after,
+    source: 'sheet',
+    success: true,
+    error: ''
+  });
 }
 
 function response_(value, e) {

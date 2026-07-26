@@ -399,6 +399,7 @@ function openCompanyEditDialog(company) {
 async function cancelCompany(company) {
   if (!company) return false;
   if (company.status === '신청취소') { toast(`${company.name} — 이미 신청취소 상태입니다.`); return false; }
+  const before = company.status;
 
   const ok = confirm(
     `«${company.name}» 을(를) 신청취소로 바꿉니다.\n\n` +
@@ -430,12 +431,19 @@ async function cancelCompany(company) {
     coachEmail: company.coachEmail || '',
     coachPhone: company.coachPhone || '',
     scheduleChanged: false,          // 일정 열은 건드리지 않는다
+    _audit: {
+      type: 'CANCEL',
+      target: company.name,
+      detail: `진행현황 ${before} → 신청취소`,
+      tone: 'warn',
+      before: { status: before },
+      after: { status: '신청취소' }
+    }
   };
 
   toast(`${company.name} 신청취소 처리 중…`);
   try {
     await requestSheetWrite(endpoint, 'updateCompany', payload);
-    const before = company.status;
     company.status = '신청취소';
     render();
     toastUndo(`${company.name} — 신청취소 처리됨`, () => restoreCompanyStatus(company, before));
@@ -469,6 +477,14 @@ async function restoreCompanyStatus(company, status) {
       coachEmail: company.coachEmail || '',
       coachPhone: company.coachPhone || '',
       scheduleChanged: false,
+      _audit: {
+        type: 'RESTORE',
+        target: company.name,
+        detail: `신청취소 → ${status || '검토요청'}`,
+        tone: 'info',
+        before: { status: '신청취소' },
+        after: { status: status || '검토요청' }
+      }
     });
     company.status = status;
     render();
@@ -662,6 +678,50 @@ async function saveCompany() {
   try {
     const wasEditing = !!companyEditTarget;
     const oldName = companyEditTarget ? companyEditTarget.name : '';
+    payload._audit = {
+      type: wasEditing ? 'EDIT' : 'ADD',
+      target: companyName,
+      detail: wasEditing
+        ? `기업 정보 및 일정 수정 완료 (${payload.status})`
+        : `새 기업 신규 등록 완료 (${payload.status})`,
+      tone: wasEditing ? 'info' : 'ok',
+      before: wasEditing ? {
+        companyName: oldName,
+        status: companyEditTarget.status,
+        owner: companyEditTarget.owner,
+        coachName: companyEditTarget.coachName,
+        contact: companyEditTarget.contact,
+        workplace: companyEditTarget.workplace,
+        startDate: companyEditTarget.start ? iso(companyEditTarget.start) : '',
+        endDate: companyEditTarget.end ? iso(companyEditTarget.end) : '',
+        consultations: companyEditTarget.consultations
+      } : '',
+      after: {
+        companyName: payload.companyName,
+        status: payload.status,
+        owner: payload.owner,
+        coachName: payload.coachName,
+        contactName: payload.contactName,
+        contactTitle: payload.contactTitle,
+        contactPhone: payload.contactPhone,
+        contactEmail: payload.contactEmail,
+        employeeCount: payload.employeeCount,
+        workplaceNumber: payload.workplaceNumber,
+        companyAddress: payload.companyAddress,
+        agencyBranch: payload.agencyBranch,
+        hrd4uId: payload.hrd4uId,
+        startDate: payload.startDate,
+        endDate: payload.endDate,
+        consult1Date: payload.consult1Date,
+        consult1Time: payload.consult1Time,
+        consult1Visit: payload.consult1Visit,
+        consult1Owner: payload.consult1Owner,
+        consult2Date: payload.consult2Date,
+        consult2Time: payload.consult2Time,
+        consult2Visit: payload.consult2Visit,
+        consult2Owner: payload.consult2Owner
+      }
+    };
     await requestSheetWrite(endpoint, wasEditing ? 'updateCompany' : 'addCompany', payload);
     if (wasEditing && oldName !== companyName && twoWeekExtensions[oldName]) {
       twoWeekExtensions[companyName] = true;
@@ -669,7 +729,7 @@ async function saveCompany() {
       try { localStorage.setItem(EXTENSION_KEY, JSON.stringify(twoWeekExtensions)); } catch {}
     }
     closeCompanyDialog({ force: true });        // 저장이 끝났으니 다시 묻지 않는다
-    const synced = await syncFromSheet(localStorage.getItem(SHEET_ENDPOINT_KEY) || DEFAULT_SHEET_URL, { silent: true });
+    const synced = await syncFromSheet(localStorage.getItem(SHEET_ENDPOINT_KEY) || DEFAULT_SHEET_URL, { silent: true, reason: 'after-write' });
     if (synced) {
       go('comp', { q: companyName, status: '', owner: '', coach: '' });
       toast(`${companyName} ${wasEditing ? '수정' : '등록'} 완료`);

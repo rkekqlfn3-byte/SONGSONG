@@ -12,7 +12,7 @@
   파일을 고친 뒤에는 이 숫자를 올려야 사용자 화면에도 새 내용이 반영됩니다.
   (올리지 않으면 브라우저가 예전 파일을 계속 씁니다)
 -->
-<link rel="stylesheet" href="assets/styles.css?v=20260726e">
+<link rel="stylesheet" href="assets/styles.css?v=20260726-headers1">
 </head>
 <body>
 
@@ -37,6 +37,13 @@
       </label>
       <button class="btn" id="btnAddCompany" data-tip="새 기업을 등록하고 Google Sheet에 저장합니다">＋ 기업</button>
       <button class="btn primary" id="btnUpdate" data-tip="연결된 Google Sheet에서 최신 데이터를 바로 불러옵니다">↻ 동기화</button>
+      <select id="autoSyncInterval" class="btn" style="min-height:36px;padding:6px 10px;font-size:12.5px;font-weight:600;" data-tip="구글 시트 변경사항 자동 동기화 주기">
+        <option value="0">자동 동기화: 끄기 (수동)</option>
+        <option value="30000">자동 동기화: 30초마다</option>
+        <option value="60000">자동 동기화: 1분마다</option>
+        <option value="180000">자동 동기화: 3분마다</option>
+      </select>
+      <button class="btn" id="btnActivityLog" data-tip="최근 작업 이력 및 동기화 로그 보기">📋 작업 로그</button>
       <button class="btn icon" id="btnSheetSettings" data-tip="Google Sheet 연결 주소 설정" aria-label="구글 시트 연결 설정">⚙</button>
       <button class="btn icon" id="btnFile" data-tip="내려받은 Excel(.xlsx) 파일로 갱신" aria-label="엑셀 파일로 갱신">↑</button>
       <button class="btn icon" id="btnTheme" data-tip="밝게 / 어둡게">◐</button>
@@ -52,6 +59,26 @@
 
 <div class="drawer-backdrop" id="drawerBackdrop" aria-hidden="true"></div>
 <div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-hidden="true"></div>
+<div class="drawer" id="activityDrawer" role="dialog" aria-modal="true" aria-hidden="true">
+  <header>
+    <div>
+      <div class="eyebrow" style="color:var(--accent);font-size:11px;font-weight:800;letter-spacing:.1em;margin-bottom:2px;">AUDIT LOG</div>
+      <h3 style="font-size:18px;margin:0;">📋 작업 이력 & 동기화 로그</h3>
+      <div class="sub" style="font-size:12px;color:var(--ink-3);margin-top:4px;">담당자 변경사항 및 시트 연동 기록 (최근 100건)</div>
+    </div>
+    <button class="btn icon" id="activityDrawerX" aria-label="닫기">✕</button>
+  </header>
+  <div class="body" style="padding:18px 20px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <span style="font-size:12.5px;color:var(--ink-2);font-weight:600;" id="activityLogCount">기록 0건</span>
+      <div style="display:flex;gap:6px;">
+        <button class="btn" id="btnExportLog" style="font-size:11.5px;padding:4px 9px;">CSV 저장</button>
+        <button class="btn" id="btnClearLog" style="font-size:11.5px;padding:4px 9px;">새로고침</button>
+      </div>
+    </div>
+    <div id="activityLogList" style="display:flex;flex-direction:column;gap:9px;"></div>
+  </div>
+</div>
 <div class="sync-dialog" id="syncDialog" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="syncTitle">
   <div class="sync-panel">
     <div class="sync-head">
@@ -185,7 +212,7 @@
                 <span class="field-hint" id="agencyBranchHint" aria-live="polite">주소를 입력하면 관할 지사를 자동으로 추천합니다.</span>
               </div>
               <div class="company-field">
-                <label for="newHrd4uId">HRD4U ID</label>
+                <label for="newHrd4uId">HRD4U</label>
                 <input id="newHrd4uId" type="text" autocomplete="off" spellcheck="false" placeholder="HRD4U 아이디">
               </div>
             </div>
@@ -298,15 +325,16 @@
 </div></div>
 <input type="file" id="filePick" accept=".xlsx,.csv" style="display:none">
 
-<script src="js/data.js?v=20260726e"></script>
-<script src="js/core.js?v=20260726g"></script>
-<script src="js/searchable-select.js?v=20260726e"></script>
-<script src="js/views.js?v=20260726e"></script>
-<script src="js/documents.js?v=20260726e"></script>
-<script src="js/mail.js?v=20260726e"></script>
-<script src="js/sheet-api.js?v=20260726e"></script>
-<script src="js/agency-branch.js?v=20260726e"></script>
-<script src="js/company-form.js?v=20260726e"></script>
-<script src="js/app.js?v=20260726e"></script>
+<script src="js/config.js?v=20260726-headers1"></script>
+<script src="js/data.js?v=20260726-headers1"></script>
+<script src="js/core.js?v=20260726-headers1"></script>
+<script src="js/searchable-select.js?v=20260726-headers1"></script>
+<script src="js/views.js?v=20260726-headers1"></script>
+<script src="js/documents.js?v=20260726-headers1"></script>
+<script src="js/mail.js?v=20260726-headers1"></script>
+<script src="js/sheet-api.js?v=20260726-headers1"></script>
+<script src="js/agency-branch.js?v=20260726-headers1"></script>
+<script src="js/company-form.js?v=20260726-headers1"></script>
+<script src="js/app.js?v=20260726-headers1"></script>
 </body>
 </html>
