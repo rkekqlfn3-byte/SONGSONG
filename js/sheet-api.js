@@ -485,7 +485,10 @@ function paintAuditHealth(status, error) {
   }
   if (status.editInstalled && status.changeInstalled) {
     box.dataset.tone = 'ok';
-    text.textContent = '시트 셀 수정·행/열 구조 변경 감사가 모두 작동 중입니다.';
+    const lastEvent = status.lastEditAt || status.lastChangeAt;
+    text.textContent = lastEvent
+      ? `시트 감사 작동 중 · 최근 직접 수정 ${lastEvent}`
+      : '시트 감사 트리거 설치됨 · 셀을 한 번 수정하면 실제 작동 시각이 표시됩니다.';
   } else if (status.editInstalled) {
     box.dataset.tone = 'warn';
     text.textContent = '셀 수정 감사만 작동 중 · installAuditTrigger를 다시 실행해주세요.';

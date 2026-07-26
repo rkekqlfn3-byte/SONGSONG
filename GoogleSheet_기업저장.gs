@@ -27,7 +27,7 @@
  *   ?action=updateExtension&payload=... 기업 종료기한 2주 연장 여부 수정
  */
 
-const VERSION = '2026-07-26-ux2';
+const VERSION = '2026-07-26-ux3';
 
 const SPREADSHEET_ID = '1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q';
 /*
@@ -50,6 +50,7 @@ function sourceSheet_(book) {
 const COACH_SHEET = '훈련코치';
 const DOCUMENT_SHEET = '서류';
 const AUDIT_SHEET = '작업로그';
+const AUDIT_TRIGGER_PROPERTY = 'AUDIT_TRIGGER_INSTALLATION';
 const AUDIT_HEADERS = [
   '일시', '요청ID', '작업자', '작업종류', '대상', '상세',
   '변경전', '변경후', '입력경로', '성공여부', '오류'
@@ -848,16 +849,28 @@ function getAuditLogs_(limit) {
 
 function auditTriggerStatus_() {
   const status = { editInstalled: false, changeInstalled: false, installedCount: 0 };
+  let recorded = {};
   try {
     ScriptApp.getProjectTriggers().forEach(function (trigger) {
       const handler = trigger.getHandlerFunction();
       if (handler === 'auditSheetEdit') status.editInstalled = true;
       if (handler === 'auditSheetChange') status.changeInstalled = true;
     });
-    status.installedCount = (status.editInstalled ? 1 : 0) + (status.changeInstalled ? 1 : 0);
   } catch (error) {
     status.error = error && error.message ? error.message : String(error);
   }
+  try {
+    recorded = JSON.parse(PropertiesService.getScriptProperties().getProperty(AUDIT_TRIGGER_PROPERTY) || '{}');
+  } catch (error) {}
+  // 웹 앱과 편집기 실행자의 «현재 사용자»가 다르면 getProjectTriggers()는 빈 배열을 돌려준다.
+  // 그래서 설치 함수가 성공했을 때 남긴 스크립트 공용 기록을 함께 사용한다.
+  status.editInstalled = status.editInstalled || recorded.editInstalled === true;
+  status.changeInstalled = status.changeInstalled || recorded.changeInstalled === true;
+  status.installedCount = (status.editInstalled ? 1 : 0) + (status.changeInstalled ? 1 : 0);
+  status.installedAt = recorded.installedAt || '';
+  status.lastEditAt = recorded.lastEditAt || '';
+  status.lastChangeAt = recorded.lastChangeAt || '';
+  status.detection = recorded.editInstalled || recorded.changeInstalled ? 'installation-record' : 'current-user';
   return status;
 }
 
@@ -878,7 +891,42 @@ function installAuditTrigger() {
   ScriptApp.newTrigger('auditSheetEdit').forSpreadsheet(book).onEdit().create();
   ScriptApp.newTrigger('auditSheetChange').forSpreadsheet(book).onChange().create();
   ensureAuditSheet_(book);
-  return 'auditSheetEdit + auditSheetChange 설치 완료';
+  const zone = book.getSpreadsheetTimeZone() || Session.getScriptTimeZone() || 'Asia/Seoul';
+  const installedAt = Utilities.formatDate(new Date(), zone, 'yyyy-MM-dd HH:mm:ss');
+  PropertiesService.getScriptProperties().setProperty(AUDIT_TRIGGER_PROPERTY, JSON.stringify({
+    editInstalled: true,
+    changeInstalled: true,
+    installedAt: installedAt,
+    lastEditAt: '',
+    lastChangeAt: ''
+  }));
+  appendAuditLog_({
+    requestId: 'trigger_install_' + Date.now(),
+    actor: 'Apps Script 사용자',
+    action: 'SETTING',
+    target: AUDIT_SHEET,
+    detail: '시트 셀 수정·행/열 구조 변경 감사 트리거 설치 완료',
+    before: '',
+    after: { auditSheetEdit: true, auditSheetChange: true, installedAt: installedAt },
+    source: 'apps-script',
+    success: true,
+    error: ''
+  });
+  const message = 'auditSheetEdit + auditSheetChange 설치 완료 · ' + installedAt;
+  console.log(message);
+  return message;
+}
+
+function markAuditTriggerEvent_(field) {
+  try {
+    const properties = PropertiesService.getScriptProperties();
+    const record = JSON.parse(properties.getProperty(AUDIT_TRIGGER_PROPERTY) || '{}');
+    const zone = Session.getScriptTimeZone() || 'Asia/Seoul';
+    record[field] = Utilities.formatDate(new Date(), zone, 'yyyy-MM-dd HH:mm:ss');
+    properties.setProperty(AUDIT_TRIGGER_PROPERTY, JSON.stringify(record));
+  } catch (error) {
+    console.error('감사 트리거 작동 시각 저장 실패', error);
+  }
 }
 
 function auditSheetEdit(e) {
@@ -886,6 +934,7 @@ function auditSheetEdit(e) {
   const sheet = e.range.getSheet();
   const sheetName = sheet.getName();
   if (!isAuditedSheetName_(sheetName)) return;
+  markAuditTriggerEvent_('lastEditAt');
 
   let actor = '';
   try { actor = Session.getActiveUser().getEmail(); } catch (error) {}
@@ -911,6 +960,7 @@ function auditSheetChange(e) {
   const sheet = e.source.getActiveSheet();
   const sheetName = sheet ? sheet.getName() : '';
   if (!isAuditedSheetName_(sheetName)) return;
+  markAuditTriggerEvent_('lastChangeAt');
   const labels = {
     INSERT_ROW: '행 추가', REMOVE_ROW: '행 삭제',
     INSERT_COLUMN: '열 추가', REMOVE_COLUMN: '열 삭제',
