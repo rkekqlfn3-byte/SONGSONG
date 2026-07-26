@@ -12,7 +12,7 @@
   파일을 고친 뒤에는 이 숫자를 올려야 사용자 화면에도 새 내용이 반영됩니다.
   (올리지 않으면 브라우저가 예전 파일을 계속 씁니다)
 -->
-<link rel="stylesheet" href="assets/styles.css?v=20260726-headers1">
+<link rel="stylesheet" href="assets/styles.css?v=20260726-fixes1">
 </head>
 <body>
 
@@ -37,7 +37,7 @@
       </label>
       <button class="btn" id="btnAddCompany" data-tip="새 기업을 등록하고 Google Sheet에 저장합니다">＋ 기업</button>
       <button class="btn primary" id="btnUpdate" data-tip="연결된 Google Sheet에서 최신 데이터를 바로 불러옵니다">↻ 동기화</button>
-      <select id="autoSyncInterval" class="btn" style="min-height:36px;padding:6px 10px;font-size:12.5px;font-weight:600;" data-tip="구글 시트 변경사항 자동 동기화 주기">
+      <select id="autoSyncInterval" class="btn" style="min-height:36px;padding:6px 10px;font-size:12.5px;font-weight:600;" data-tip="구글 시트 변경사항 자동 동기화 주기" aria-label="자동 동기화 주기">
         <option value="0">자동 동기화: 끄기 (수동)</option>
         <option value="30000">자동 동기화: 30초마다</option>
         <option value="60000">자동 동기화: 1분마다</option>
@@ -325,16 +325,16 @@
 </div></div>
 <input type="file" id="filePick" accept=".xlsx,.csv" style="display:none">
 
-<script src="js/config.js?v=20260726-headers1"></script>
-<script src="js/data.js?v=20260726-headers1"></script>
-<script src="js/core.js?v=20260726-headers1"></script>
-<script src="js/searchable-select.js?v=20260726-headers1"></script>
-<script src="js/views.js?v=20260726-headers1"></script>
-<script src="js/documents.js?v=20260726-headers1"></script>
-<script src="js/mail.js?v=20260726-headers1"></script>
-<script src="js/sheet-api.js?v=20260726-headers1"></script>
-<script src="js/agency-branch.js?v=20260726-headers1"></script>
-<script src="js/company-form.js?v=20260726-headers1"></script>
-<script src="js/app.js?v=20260726-headers1"></script>
+<script src="js/config.js?v=20260726-fixes1"></script>
+<script src="js/data.js?v=20260726-fixes1"></script>
+<script src="js/core.js?v=20260726-fixes1"></script>
+<script src="js/searchable-select.js?v=20260726-fixes1"></script>
+<script src="js/views.js?v=20260726-fixes1"></script>
+<script src="js/documents.js?v=20260726-fixes1"></script>
+<script src="js/mail.js?v=20260726-fixes1"></script>
+<script src="js/sheet-api.js?v=20260726-fixes1"></script>
+<script src="js/agency-branch.js?v=20260726-fixes1"></script>
+<script src="js/company-form.js?v=20260726-fixes1"></script>
+<script src="js/app.js?v=20260726-fixes1"></script>
 </body>
 </html>

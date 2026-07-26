@@ -18,6 +18,19 @@ function companyStageProgressInner(company) {
 function companyStageProgressHtml(company) {
   return `<div class="matrix-company-cell" data-stage-company="${esc(company.name)}">${companyStageProgressInner(company)}</div>`;
 }
+function docsMobileCardInner(company, defs) {
+  const done = defs.filter(def => filled(company.docs[def.k])).length;
+  const missing = defs.filter(def => !filled(company.docs[def.k])).map(def => def.short.replace(/\n/g, ' '));
+  const missingText = missing.length
+    ? `미제출 ${missing.length}종 · ${missing.slice(0, 3).map(esc).join(' · ')}${missing.length > 3 ? ' 외' : ''}`
+    : '선택한 단계의 서류가 모두 제출됐습니다.';
+  return `<div class="docs-mobile-head">${badge(company.status)}<strong>${esc(company.name)}</strong>` +
+    `<span>${done}/${defs.length}</span></div>` +
+    `<div class="docs-mobile-progress">${companyStageProgressInner(company)}</div>` +
+    `<div class="docs-mobile-meta"><span>담당 ${esc(company.owner || '미배정')}</span>` +
+    `<span>코치 ${esc(company.coachName || '미배정')}</span></div>` +
+    `<div class="docs-mobile-missing">${missingText}</div>`;
+}
 
 function viewDocs() {
   const s = state.docs;
@@ -88,12 +101,26 @@ function viewDocs() {
     });
   });
   const tbl = table(cols, list.map(c => (c._key = c.name, c)), { cls: 'matrix', groupRow, onPick: openCompany });
+  const mobileList = el('div', 'docs-mobile-list');
+  list.forEach(c => {
+    const card = el('button', 'docs-mobile-card');
+    card.type = 'button';
+    card.dataset.docCardCompany = c.name;
+    card.setAttribute('aria-label', `${c.name} 서류 상세 및 수정`);
+    card.innerHTML = docsMobileCardInner(c, defs);
+    card.onclick = () => openCompany(c);
+    mobileList.appendChild(card);
+  });
 
   // 셀 단위로 다시 그릴 수 있도록 현재 화면 구성을 기억해 둔다 (저장할 때 표 전체를 재구축하지 않으려고)
   docsView = { list, defs, visible: list };
   // 검색은 표를 다시 그리지 않고 행만 숨긴다 — 한글 조합이 끊기지 않는다
   liveSearch = query => {
     docsView.visible = filterRowsInPlace(tbl.querySelector('tbody'), list, query, DOC_SEARCH_FIELDS);
+    const visibleNames = new Set(docsView.visible.map(c => c.name));
+    mobileList.querySelectorAll('[data-doc-card-company]').forEach(card => {
+      card.hidden = !visibleNames.has(card.dataset.docCardCompany);
+    });
     refreshDocsSummary();
   };
 
@@ -103,6 +130,7 @@ function viewDocs() {
     th.classList.add('vert');
     th.dataset.tip = defs[i - 4].label;
   });
+  let firstEditableCell = true;
   tbl.querySelectorAll('tbody tr').forEach((tr, ri) => {
     const c = list[ri];
     [...tr.children].forEach((td, ci) => {
@@ -115,8 +143,9 @@ function viewDocs() {
       if (!docEditable(d)) { td.classList.add('locked'); return; }
 
       td.classList.add('editable');
-      td.tabIndex = -1;
-      td.onclick = e => { e.stopPropagation(); openDocCell(td); };
+      td.tabIndex = firstEditableCell ? 0 : -1;
+      firstEditableCell = false;
+      td.onclick = e => { e.stopPropagation(); setDocRovingFocus(td); openDocCell(td); };
       td.onkeydown = e => {
         if (docEditing) return;                 // 편집 중에는 칸이 아니라 입력칸이 키를 받는다
         const step = DOC_ARROWS[e.key];
@@ -132,12 +161,13 @@ function viewDocs() {
     `<div class="docs-stat good"><span>제출</span><strong id="docsDone">0</strong></div>` +
     `<div class="docs-stat bad"><span>미제출</span><strong id="docsMiss">0</strong></div>` +
     `<div class="docs-stat"><span>완료율</span><strong id="docsRate">0%</strong></div>` +
-    `<div class="docs-edit-hint">셀을 누르면 바로 수정 · <b>Enter</b> 아래칸 · <b>Tab</b> 옆칸 · <b>Esc</b> 취소</div>`;
+    `<div class="docs-edit-hint docs-edit-hint-desktop">셀을 누르면 바로 수정 · <b>Enter</b> 아래칸 · <b>Tab</b> 옆칸 · <b>Esc</b> 취소</div>` +
+    `<div class="docs-edit-hint docs-edit-hint-mobile">기업 카드를 누르면 상세 화면에서 서류를 수정할 수 있습니다.</div>`;
   const sum = el('div', 'count-note');
   sum.id = 'docsSummary';
 
   const box = el('div');
-  box.append(bar, overview, tbl, sum);
+  box.append(bar, overview, tbl, mobileList, sum);
   requestAnimationFrame(refreshDocsSummary);   // 통계는 DOM에 붙은 뒤 채운다
   return box;
 }
@@ -191,6 +221,11 @@ function repaintDocCells(companyNames, keys) {
     const company = findCompany(host.dataset.stageCompany);
     if (company) host.innerHTML = companyStageProgressInner(company);
   });
+  document.querySelectorAll('[data-doc-card-company]').forEach(card => {
+    if (!names.has(card.dataset.docCardCompany)) return;
+    const company = findCompany(card.dataset.docCardCompany);
+    if (company) card.innerHTML = docsMobileCardInner(company, docsView.defs);
+  });
   refreshDocsSummary();
 }
 function refreshDocsSummary() {
@@ -231,9 +266,16 @@ function moveDocCell(td, dCol, dRow) {
 }
 function focusDocCell(td) {
   if (!td) return;
+  setDocRovingFocus(td);
   td.focus();
   const def = byDocKey(td.dataset.docKey);
   if (def && def.type !== 'mark') openDocCell(td);   // 날짜 칸은 이동하면 바로 입력 상태로
+}
+function setDocRovingFocus(td) {
+  const matrix = td && td.closest('.matrix');
+  if (!matrix) return;
+  matrix.querySelectorAll('td.editable[tabindex="0"]').forEach(cell => { cell.tabIndex = -1; });
+  td.tabIndex = 0;
 }
 /** td 하나로 기업·항목을 찾아 편집을 연다 */
 function openDocCell(td) {
@@ -654,10 +696,13 @@ function openCompany(c, docsEditMode) {
         };
       });
     }
-    $('#extensionCheck', d).onchange = e => {
+    $('#extensionCheck', d).onchange = async e => {
       const enabled = e.target.checked;
-      if (!setCompanyExtension(c, enabled)) {
-        e.target.checked = false;
+      e.target.disabled = true;
+      const saved = await setCompanyExtension(c, enabled);
+      if (!saved) {
+        e.target.checked = !enabled;
+        e.target.disabled = false;
         return;
       }
       if (typeof renderActivityLogs === 'function') renderActivityLogs();

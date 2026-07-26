@@ -16,6 +16,8 @@
       const label = document.querySelector(`label[for="${select.id}"]`);
       if (label) return label.textContent.replace('*', '').trim();
     }
+    const explicit = select.getAttribute('aria-label') || select.getAttribute('title');
+    if (explicit) return explicit.trim();
     const fieldLabel = select.closest('.field,.company-field')?.querySelector('label');
     return fieldLabel ? fieldLabel.textContent.replace('*', '').trim() : '목록';
   };
@@ -35,6 +37,7 @@
 
     const host = document.createElement('div');
     host.className = 'searchable-select';
+    if (select.id) host.dataset.selectId = select.id;
     const input = document.createElement('input');
     const panel = document.createElement('div');
     const listId = `searchableSelectList${++optionId}`;

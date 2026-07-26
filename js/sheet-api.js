@@ -18,7 +18,7 @@ const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1zFc5m2g25y_CV
  */
 const DEFAULT_WRITE_URL = 'https://script.google.com/macros/s/AKfycbwK8dm8mUev8vMZeLLHWRbQI-p0viyqIMzIuuVP7nxjA2V-CEd9Nc4dd02vexJvsZ8x3w/exec';
 
-/** 기업별 2주 연장 여부 — 시트 원본은 건드리지 않고 이 브라우저에 별도로 보관한다 */
+/** 예전 버전에서 브라우저에만 저장했던 연장값. 시트 열이 생기기 전 데이터의 일회성 호환용이다. */
 function readExtensions() {
   try {
     const saved = JSON.parse(localStorage.getItem(EXTENSION_KEY) || '{}');
@@ -27,28 +27,51 @@ function readExtensions() {
 }
 let twoWeekExtensions = readExtensions();
 function updateCompanyDeadline(company) {
-  company.extended = !!(company.end && twoWeekExtensions[company.name]);
+  // 예전 브라우저 저장값은 새 시트 열로 옮길 때까지 함께 인정한다.
+  const sheetValue = filled(company.extensionRaw) || !!twoWeekExtensions[company.name];
+  company.extended = !!(company.end && sheetValue);
   company.effectiveEnd = company.end && company.extended ? addDays(company.end, 14) : company.end;
   company.dday = ACTIVE.has(company.status) ? daysFromToday(company.effectiveEnd) : null;
 }
-function setCompanyExtension(company, enabled) {
+async function setCompanyExtension(company, enabled) {
   if (!company || !company.end) {
-    if (company && twoWeekExtensions[company.name]) {
-      delete twoWeekExtensions[company.name];
-      try { localStorage.setItem(EXTENSION_KEY, JSON.stringify(twoWeekExtensions)); } catch {}
-    }
     toast('종료기한을 먼저 입력해야 2주 연장을 적용할 수 있습니다.');
     return false;
   }
-  if (enabled) twoWeekExtensions[company.name] = true;
-  else delete twoWeekExtensions[company.name];
-  try { localStorage.setItem(EXTENSION_KEY, JSON.stringify(twoWeekExtensions)); }
-  catch { toast('2주 연장 상태를 저장하지 못했습니다. 이번 화면에만 적용됩니다.'); }
+
+  const before = {
+    extended: company.extended,
+    extensionRaw: company.extensionRaw,
+    extensionStored: company.extensionStored,
+  };
+  company.extensionRaw = enabled ? 'O' : '';
+  company.extensionStored = true;
   updateCompanyDeadline(company);
-  if (typeof addLog === 'function') {
-    addLog('EXTEND', company.name, enabled ? '종료 기한 2주 연장 적용 (+14일)' : '2주 연장 해제 (기존 기한 복원)', enabled ? 'warn' : 'info');
+
+  try {
+    await requestSheetWrite(writeEndpoint(), 'updateExtension', {
+      companyName: company.name,
+      extended: enabled ? 'O' : '',
+      _audit: {
+        type: 'EXTEND',
+        target: company.name,
+        detail: enabled ? '종료 기한 2주 연장 적용 (+14일)' : '2주 연장 해제 (기존 기한 복원)',
+        tone: enabled ? 'warn' : 'info',
+        before: { extended: before.extended ? 'O' : '' },
+        after: { extended: enabled ? 'O' : '' },
+      },
+    });
+    delete twoWeekExtensions[company.name];
+    try { localStorage.setItem(EXTENSION_KEY, JSON.stringify(twoWeekExtensions)); } catch {}
+    return true;
+  } catch (error) {
+    company.extended = before.extended;
+    company.extensionRaw = before.extensionRaw;
+    company.extensionStored = before.extensionStored;
+    updateCompanyDeadline(company);
+    toast('2주 연장 저장 실패 — ' + (error.message || '연결을 확인해주세요.'));
+    return false;
   }
-  return true;
 }
 
 /** 서류·일정 입력에 붙는 기준 연도 — 상단에서 한 번 정하면 계속 유지된다 */
@@ -204,7 +227,10 @@ let syncInFlightPromise = null;
 function syncBlockedByEditing() {
   const documentCellOpen = typeof docEditing !== 'undefined' && !!docEditing;
   const companyFormOpen = typeof COMPANY_DIALOG !== 'undefined' && COMPANY_DIALOG.classList.contains('open');
-  return documentCellOpen || companyFormOpen;
+  const drawerEditOpen = typeof DRAWER !== 'undefined' &&
+    DRAWER.classList.contains('open') &&
+    !!DRAWER.querySelector('.doc-row-edit');
+  return documentCellOpen || companyFormOpen || drawerEditOpen;
 }
 
 async function syncFromSheet(endpoint, options) {
@@ -283,6 +309,9 @@ function writeAuditMeta(action, payload) {
   }
   if (action === 'updateCoachDocs') {
     return { type: 'COACH_DOC', target: sent.coachName, detail: '코치 공통 서류 변경', tone: 'warn' };
+  }
+  if (action === 'updateExtension') {
+    return { type: 'EXTEND', target: sent.companyName, detail: '종료 기한 2주 연장 변경', tone: 'warn' };
   }
   return null;
 }

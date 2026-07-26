@@ -240,6 +240,7 @@ const SOURCE_EXTRA_HEADERS = {
   agencyBranch: ['공단지사'],
   // «HRD4U ID»는 의도적으로 후보에 넣지 않는다.
   hrd4uId: ['HRD4U'],
+  twoWeekExtension: ['2주 연장'],
   visitOwner: ['담당'],
   visitDate: ['일자'],
   visitTime: ['시간'],
@@ -433,6 +434,8 @@ function normalize(raw) {
         dateRaw: cell(r, 'visitDate'),
         time: cell(r, 'visitTime'),
       },
+      extensionRaw: cell(r, 'twoWeekExtension'),
+      extensionStored: sourceColumns.twoWeekExtension != null,
       coachName, coach,
       // 기업 행에 별도 연락처가 있으면 그 값을 보존하고, 비어 있을 때만 코치 마스터를 쓴다.
       coachEmail: (cell(r, 'coachEmail') === '0' ? '' : cell(r, 'coachEmail')) || (coach && coach.email) || '',

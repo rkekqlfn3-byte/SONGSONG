@@ -298,15 +298,27 @@ function table(cols, rows, opts) {
     };
   }
   const tbody = el('tbody');
+  const columnLabel = c => {
+    const holder = document.createElement('span');
+    holder.innerHTML = String(c.h || '').replace(/<br\s*\/?>/gi, ' ');
+    return (holder.textContent || '').replace(/\s+/g, ' ').trim();
+  };
   rows.forEach(r => {
     const tr = el('tr', (opts.onPick ? 'pick' : '') + (opts.selKey && opts.selKey === r._key ? ' sel' : ''));
-    tr.innerHTML = cols.map(c => `<td class="${c.cls || ''}">${c.cell(r)}</td>`).join('');
+    tr.innerHTML = cols.map(c =>
+      `<td class="${c.cls || ''}" data-label="${esc(columnLabel(c))}">${c.cell(r)}</td>`).join('');
     if (opts.onPick) {
-      tr.onclick = () => opts.onPick(r);
+      tr.onclick = e => {
+        if (e.target.closest('button,a,input,select,textarea,label')) return;
+        opts.onPick(r);
+      };
       tr.tabIndex = 0;
-      tr.setAttribute('role', 'button');
+      tr.setAttribute('aria-label', opts.rowLabel ? opts.rowLabel(r) : '행 상세 보기');
       tr.onkeydown = e => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); opts.onPick(r); }
+        if (e.target === tr && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          opts.onPick(r);
+        }
       };
     }
     tbody.appendChild(tr);
@@ -447,6 +459,8 @@ function viewCompanies() {
   const tableOpts = () => ({
     onSort: k => { if (s.sort === k) s.dir *= -1; else { s.sort = k; s.dir = 1; } render(); },
     sortKey: s.sort, sortDir: s.dir, selKey: s.sel, onPick: openCompany,
+    rowLabel: c => `${c.name} 기업 상세 보기`,
+    cls: 'mobile-cards company-table',
   });
   const note = n => `${n}건 표시 / 전체 ${all.length}건 · 행을 누르면 상세가 열립니다`;
   const makeCompanyTable = r => {
@@ -564,6 +578,8 @@ function viewCoaches() {
   const tableOpts = () => ({
     onSort: k => { if (s.sort === k) s.dir *= -1; else { s.sort = k; s.dir = 1; } render(); },
     sortKey: s.sort, sortDir: s.dir, selKey: s.sel, onPick: openCoach,
+    rowLabel: c => `${c.name} 코치 상세 보기`,
+    cls: 'mobile-cards coach-table',
   });
   const listHost = el('div');
   const countNote = el('div', 'count-note');

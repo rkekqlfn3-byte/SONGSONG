@@ -24,9 +24,10 @@
  *   ?action=updateCompany&payload=...  기존 기업의 기본정보 수정
  *   ?action=updateDocs&payload=...     이미 있는 기업의 서류 날짜만 수정
  *   ?action=updateCoachDocs&payload=... 코치 공통 서식8·9·10·통장사본 수정
+ *   ?action=updateExtension&payload=... 기업 종료기한 2주 연장 여부 수정
  */
 
-const VERSION = '2026-07-26-headers1';
+const VERSION = '2026-07-26-fixes1';
 
 const SPREADSHEET_ID = '1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q';
 /*
@@ -104,6 +105,15 @@ const COMPANY_INFO_COLUMNS = [
   { key: 'hrd4uId',          header: 'HRD4U',             aliases: ['HRD4U'], type: 'text' }
 ];
 
+/** 종료기한 연장 여부는 기업 기본정보 수정과 분리해, 일반 수정 때 기존 체크가 지워지지 않게 한다. */
+const COMPANY_EXTENSION_COLUMN = {
+  key: 'twoWeekExtension',
+  header: '2주 연장',
+  aliases: ['2주 연장'],
+  type: 'mark'
+};
+const COMPANY_SOURCE_COLUMNS = COMPANY_INFO_COLUMNS.concat([COMPANY_EXTENSION_COLUMN]);
+
 /** 기업 원본 탭에 추가되는 1·2차 컨설팅 일정 열. 기존 열은 건드리지 않고 마지막 열 뒤에 붙인다. */
 const CONSULTATION_COLUMNS = [
   { key: 'consult1Date',  header: '1차 컨설팅일', type: 'date' },
@@ -180,6 +190,9 @@ function doGet(e) {
     } else if (action === 'updateCoachDocs') {
       const updated = updateCoachDocs_(payload);
       result = { coach: updated.coach, coachRow: updated.coachRow, wrote: updated.wrote };
+    } else if (action === 'updateExtension') {
+      const updated = updateExtension_(payload);
+      result = { company: updated.company, row: updated.row, extended: updated.extended };
     } else if (action === 'updateCompany') {
       const updated = updateCompany_(payload);
       result = { company: updated.company, row: updated.row, docRow: updated.docRow };
@@ -294,7 +307,7 @@ function sourceColumns_(sheet) {
       visitDate: '일자',
       visitTime: '시간'
     };
-    COMPANY_INFO_COLUMNS.concat(CONSULTATION_COLUMNS).forEach(function (def) {
+    COMPANY_SOURCE_COLUMNS.concat(CONSULTATION_COLUMNS).forEach(function (def) {
       extraHeaders[def.key] = def.aliases || [def.header];
     });
     Object.keys(extraHeaders).forEach(function (key) {
@@ -332,6 +345,10 @@ function ensureSourceExtraColumns_(sheet, definitions, groupTitle) {
 
 function ensureCompanyInfoColumns_(sheet) {
   ensureSourceExtraColumns_(sheet, COMPANY_INFO_COLUMNS, '사업장 정보');
+}
+
+function ensureExtensionColumn_(sheet) {
+  ensureSourceExtraColumns_(sheet, [COMPANY_EXTENSION_COLUMN], '종료기한 관리');
 }
 
 function ensureConsultationColumns_(sheet) {
@@ -543,6 +560,46 @@ function updateCompany_(data) {
     }
     SpreadsheetApp.flush();
     return { company: companyName, row: targetRow, docRow: written ? written.row : null };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** 기업 종료기한의 2주 연장 여부만 원본 탭에 저장한다. */
+function updateExtension_(data) {
+  const companyName = cleanText_(data.companyName);
+  if (!companyName) throw new Error('기업명이 필요합니다.');
+  const enabled = data.extended === true ||
+    /^(O|1|true|yes)$/i.test(String(data.extended == null ? '' : data.extended).trim());
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const book = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const source = sourceSheet_(book);
+    ensureExtensionColumn_(source);
+    const columns = sourceColumns_(source);
+    const lastRow = source.getLastRow();
+    if (lastRow < SOURCE_FIRST_ROW) throw new Error('기업 데이터를 찾지 못했습니다.');
+
+    const names = source
+      .getRange(SOURCE_FIRST_ROW, columns.companyName, lastRow - SOURCE_FIRST_ROW + 1, 1)
+      .getDisplayValues();
+    let targetRow = 0;
+    for (let i = 0; i < names.length; i++) {
+      if (String(names[i][0] || '').trim() === companyName) {
+        targetRow = SOURCE_FIRST_ROW + i;
+        break;
+      }
+    }
+    if (!targetRow) throw new Error('«' + companyName + '» 기업 행을 찾지 못했습니다.');
+    if (enabled && !source.getRange(targetRow, columns.endDate).getValue()) {
+      throw new Error('종료기한을 먼저 입력해야 2주 연장을 적용할 수 있습니다.');
+    }
+
+    source.getRange(targetRow, columns.twoWeekExtension).setValue(enabled ? 'O' : '');
+    SpreadsheetApp.flush();
+    return { company: companyName, row: targetRow, extended: enabled };
   } finally {
     lock.releaseLock();
   }
