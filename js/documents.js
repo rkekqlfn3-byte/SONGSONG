@@ -642,6 +642,7 @@ function openCompany(c, docsEditMode) {
     : '';
 
   openDrawer(esc(c.name), `${badge(c.status)} <span class="dim">담당 ${esc(c.owner || '미배정')}</span>`, `
+    ${c.memo ? `<div class="sect memo-sect"><h4>메모</h4><p class="memo-text">${esc(c.memo)}</p></div>` : ''}
     <div class="sect"><h4>사업장 정보</h4><dl class="kv">
       <dt>근로자 수</dt><dd>${workplace.employeeCount ? `${esc(workplace.employeeCount)}명` : '<span class="dim">—</span>'}</dd>
       <dt>관리번호</dt><dd>${copyLine(workplace.managementNumber, '사업장관리번호')}</dd>

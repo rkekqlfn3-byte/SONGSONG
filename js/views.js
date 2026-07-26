@@ -359,7 +359,7 @@ const COMP_SEARCH_FIELDS = c =>
   [
     c.name, c.contact.name, c.contact.email, c.contact.phone,
     ...Object.values(c.workplace || {}),
-    c.coachName, c.owner, c.status,
+    c.coachName, c.owner, c.status, c.memo,
   ];
 
 function filteredCompanies() {
@@ -408,12 +408,12 @@ function viewCompanies() {
   bar.appendChild(add);
   const exp = el('button', 'btn', 'CSV 내보내기');
   exp.onclick = () => csvDownload('기업목록.csv', [
-    ['진행현황', '담당자', '기업명', '근로자수', '사업장관리번호', '주소', '공단지사', 'HRD4U',
+    ['진행현황', '담당자', '기업명', '메모', '근로자수', '사업장관리번호', '주소', '공단지사', 'HRD4U',
       '기업담당자', '직급', '전화', '이메일',
       '1차 컨설팅일', '1차 시간', '1차 동행', '1차 동행 담당자',
       '2차 컨설팅일', '2차 시간', '2차 동행', '2차 동행 담당자',
       '원 종료기한', '2주연장', '적용 종료기한', 'D-day', '코치', '코치이메일', '서류제출'],
-    ...rows.map(c => [c.status, c.owner, c.name,
+    ...rows.map(c => [c.status, c.owner, c.name, c.memo || '',
       (c.workplace || {}).employeeCount, (c.workplace || {}).managementNumber,
       (c.workplace || {}).address, (c.workplace || {}).agencyBranch, (c.workplace || {}).hrd4uId,
       c.contact.name, c.contact.title, c.contact.phone, c.contact.email,
@@ -430,6 +430,7 @@ function viewCompanies() {
     { k: 'status', h: '진행현황', cell: c => badge(c.status) },
     { k: 'name', h: '기업명', cls: 'company-name', cell: c =>
       `<div class="company-name-wrap"><span class="strong">${esc(c.name)}</span>` +
+      (c.memo ? `<span class="row-memo" data-tip="${esc(c.memo)}">${esc(c.memo)}</span>` : '') +
       `<button type="button" class="row-edit-company" data-company-edit="${esc(c.name)}" aria-label="${esc(c.name)} 정보 수정">수정</button>` +
       (c.status === '신청취소' ? '' :
         `<button type="button" class="row-edit-company row-cancel-company" data-company-cancel="${esc(c.name)}" aria-label="${esc(c.name)} 신청취소 처리">취소</button>`) +

@@ -255,6 +255,7 @@ const SOURCE_EXTRA_HEADERS = {
   contactTitle: ['직급'],
   contactPhone: ['전화번호'],
   contactEmail: ['이메일'],
+  memo: ['메모'],
   start: ['컨설팅시작', '컨설팅 시작'],
   end: ['종료기한', '종료 기한'],
   employeeCount: ['근로자수'],
@@ -437,6 +438,7 @@ function normalize(raw) {
         hrd4uId: cell(r, 'hrd4uId'),
       },
       startRaw: cell(r, 'start'), endRaw: cell(r, 'end'),
+      memo: cell(r, 'memo'),
       consultations: [
         {
           dateRaw: cell(r, 'consult1Date'),

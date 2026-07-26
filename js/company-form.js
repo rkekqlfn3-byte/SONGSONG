@@ -15,7 +15,7 @@ const COMPANY_STEPS = ['basic', 'schedule', 'docs'];
 const OPTIONAL_COMPANY_FIELDS = [
   'newOwner', 'newCoach', 'newContactName', 'newContactTitle',
   'newContactPhone', 'newContactEmail', 'newEmployeeCount', 'newWorkplaceNumber',
-  'newCompanyAddress', 'newAgencyBranch', 'newHrd4uId',
+  'newCompanyAddress', 'newAgencyBranch', 'newHrd4uId', 'newMemo',
   'newConsult1Date', 'newConsult2Date',
 ];
 
@@ -365,6 +365,7 @@ function openCompanyEditDialog(company) {
   $('#newContactTitle').value = company.contact.title;
   $('#newContactPhone').value = company.contact.phone;
   $('#newContactEmail').value = company.contact.email;
+  $('#newMemo').value = company.memo || '';
   const workplace = company.workplace || {};
   $('#newEmployeeCount').value = workplace.employeeCount || '';
   $('#newWorkplaceNumber').value = workplace.managementNumber || '';
@@ -753,6 +754,7 @@ async function saveCompany() {
     contactTitle: $('#newContactTitle').value.trim(),
     contactPhone: $('#newContactPhone').value.trim(),
     contactEmail: $('#newContactEmail').value.trim(),
+    memo: $('#newMemo').value.trim(),
     employeeCount: $('#newEmployeeCount').value.trim(),
     workplaceNumber: $('#newWorkplaceNumber').value.trim(),
     companyAddress: $('#newCompanyAddress').value.trim(),
@@ -793,6 +795,7 @@ async function saveCompany() {
         coachName: companyEditTarget.coachName,
         contact: companyEditTarget.contact,
         workplace: companyEditTarget.workplace,
+        memo: companyEditTarget.memo || '',
         startDate: companyEditTarget.start ? iso(companyEditTarget.start) : '',
         endDate: companyEditTarget.end ? iso(companyEditTarget.end) : '',
         consultations: companyEditTarget.consultations
@@ -811,6 +814,7 @@ async function saveCompany() {
         companyAddress: payload.companyAddress,
         agencyBranch: payload.agencyBranch,
         hrd4uId: payload.hrd4uId,
+        memo: payload.memo,
         startDate: payload.startDate,
         endDate: payload.endDate,
         consult1Date: payload.consult1Date,

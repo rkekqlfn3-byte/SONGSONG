@@ -1341,3 +1341,31 @@ tbody tr.sel td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
   .card,.kpi,.tablewrap{box-shadow:none;break-inside:avoid}
   body::before{content:"대외비 · 개인정보 포함 — 외부 반출 금지";display:block;padding:8px 0;font-size:11px;color:#d03b3b;font-weight:700}
 }
+
+/* 기업 메모 — 상세 패널 맨 위에 눈에 띄게 */
+.memo-sect{
+  border-left:3px solid var(--warning);
+  padding-left:11px;background:color-mix(in srgb,var(--warning) 7%,transparent);
+  border-radius:0 9px 9px 0;
+}
+.memo-text{margin:0;font-size:12.5px;line-height:1.55;color:var(--ink-1);white-space:pre-wrap;word-break:break-word}
+/* 기업 목록의 메모 표시 — 좁으니 말줄임하고 전체는 마우스 올려서 */
+.row-memo{
+  display:inline-block;flex:0 1 150px;min-width:0;max-width:150px;margin-left:6px;vertical-align:middle;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--ink-3);font-size:11px;
+}
+.row-memo::before{content:"✎ ";color:var(--warning)}
+.company-name-wrap{min-width:0}
+#companyForm textarea{
+  width:100%;min-height:0;resize:vertical;
+  font:inherit;font-size:12.5px;line-height:1.5;
+}
+@media(max-width:900px){
+  .mobile-cards .company-name-wrap{
+    display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:7px 8px;
+  }
+  .mobile-cards .row-memo{
+    grid-column:1 / -1;grid-row:2;max-width:100%;margin-left:0;
+  }
+}

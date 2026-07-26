@@ -27,7 +27,7 @@
  *   ?action=updateExtension&payload=... 기업 종료기한 2주 연장 여부 수정
  */
 
-const VERSION = '2026-07-26-ux5';
+const VERSION = '2026-07-26-ux6';
 
 const SPREADSHEET_ID = '1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q';
 /*
@@ -324,6 +324,7 @@ function sourceColumns_(sheet) {
       contactTitle: ['직급'],
       contactPhone: ['전화번호'],
       contactEmail: ['이메일'],
+      memo: ['메모'],
       startDate: ['컨설팅시작', '컨설팅 시작'],
       endDate: ['종료기한', '종료 기한'],
       visitOwner: ['방문 담당', '담당'],   // 시트에서 «담당» → «방문 담당» 으로 바뀜
@@ -499,6 +500,7 @@ function addCompany_(data) {
     row[columns.contactTitle - 1] = cleanText_(data.contactTitle);
     row[columns.contactPhone - 1] = cleanText_(data.contactPhone);
     row[columns.contactEmail - 1] = cleanText_(data.contactEmail);
+    if (columns.memo) row[columns.memo - 1] = cleanText_(data.memo);
     Object.keys(companyInfo).forEach(function (key) {
       row[columns[key] - 1] = companyInfo[key];
     });
@@ -567,11 +569,15 @@ function updateCompany_(data) {
     Object.keys(companyInfo).forEach(function (key) {
       values[key] = companyInfo[key];
     });
+    // 메모는 보내온 경우에만 건드린다. 안 보냈는데 덮어쓰면 기존 메모가 지워진다.
+    if (Object.prototype.hasOwnProperty.call(data, 'memo')) values.memo = cleanText_(data.memo);
     if (!hasScheduleFlag || scheduleChanged) {
       values.startDate = parseDate_(data.startDate);
       values.endDate = parseDate_(data.endDate);
     }
     Object.keys(values).forEach(function (key) {
+      // 시트에 그 열이 없으면 건너뛴다 (헤더를 못 찾은 항목까지 쓰려다 오류가 나지 않게)
+      if (!columns[key]) return;
       source.getRange(targetRow, columns[key]).setValue(values[key]);
     });
     if (schedule) writeConsultationCells_(source, targetRow, columns, schedule);
