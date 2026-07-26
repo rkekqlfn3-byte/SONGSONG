@@ -12,7 +12,7 @@
   파일을 고친 뒤에는 이 숫자를 올려야 사용자 화면에도 새 내용이 반영됩니다.
   (올리지 않으면 브라우저가 예전 파일을 계속 씁니다)
 -->
-<link rel="stylesheet" href="assets/styles.css?v=20260726-ux9">
+<link rel="stylesheet" href="assets/styles.css?v=20260726-ux10">
 </head>
 <body>
 
@@ -70,7 +70,7 @@
     <div>
       <div class="eyebrow" style="color:var(--accent);font-size:11px;font-weight:800;letter-spacing:.1em;margin-bottom:2px;">AUDIT LOG</div>
       <h3 style="font-size:18px;margin:0;">📋 작업 이력 & 동기화 로그</h3>
-      <div class="sub" style="font-size:12px;color:var(--ink-3);margin-top:4px;">담당자 변경사항 및 시트 연동 기록 (최근 100건)</div>
+      <div class="sub" style="font-size:12px;color:var(--ink-3);margin-top:4px;">담당자 변경사항 및 시트 연동 전체 기록</div>
     </div>
     <button class="btn icon" id="activityDrawerX" aria-label="닫기">✕</button>
   </header>
@@ -125,6 +125,9 @@
       <label class="sync-label-secondary" for="sheetWriteEndpoint">기업 저장용 Apps Script 주소</label>
       <input type="url" id="sheetWriteEndpoint" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
       <p>기업 추가 내용을 시트에 쓰기 위한 주소입니다. 제공된 저장 스크립트를 한 번 배포한 뒤 <b>/exec</b> 주소를 입력하세요.</p>
+      <label class="sync-label-secondary" for="webOperatorName">웹 작업자 이름</label>
+      <input type="text" id="webOperatorName" maxlength="40" placeholder="예: 송상현" autocomplete="name">
+      <p>웹에서 기업·서류를 수정할 때 작업로그의 작업자로 기록됩니다. 이 브라우저에 한 번만 저장하면 됩니다.</p>
       <div class="sync-state" id="syncState" aria-live="polite"></div>
     </div>
     <div class="sync-actions">
@@ -359,16 +362,16 @@
 </div></div>
 <input type="file" id="filePick" accept=".xlsx,.csv" style="display:none">
 
-<script src="js/config.js?v=20260726-ux9"></script>
-<script src="js/data.js?v=20260726-ux9"></script>
-<script src="js/core.js?v=20260726-ux9"></script>
-<script src="js/searchable-select.js?v=20260726-ux9"></script>
-<script src="js/views.js?v=20260726-ux9"></script>
-<script src="js/documents.js?v=20260726-ux9"></script>
-<script src="js/mail.js?v=20260726-ux9"></script>
-<script src="js/sheet-api.js?v=20260726-ux9"></script>
-<script src="js/agency-branch.js?v=20260726-ux9"></script>
-<script src="js/company-form.js?v=20260726-ux9"></script>
-<script src="js/app.js?v=20260726-ux9"></script>
+<script src="js/config.js?v=20260726-ux10"></script>
+<script src="js/data.js?v=20260726-ux10"></script>
+<script src="js/core.js?v=20260726-ux10"></script>
+<script src="js/searchable-select.js?v=20260726-ux10"></script>
+<script src="js/views.js?v=20260726-ux10"></script>
+<script src="js/documents.js?v=20260726-ux10"></script>
+<script src="js/mail.js?v=20260726-ux10"></script>
+<script src="js/sheet-api.js?v=20260726-ux10"></script>
+<script src="js/agency-branch.js?v=20260726-ux10"></script>
+<script src="js/company-form.js?v=20260726-ux10"></script>
+<script src="js/app.js?v=20260726-ux10"></script>
 </body>
 </html>

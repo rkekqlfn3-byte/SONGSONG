@@ -6,8 +6,30 @@ const el = (t, cls, txt) => { const n = document.createElement(t); if (cls) n.cl
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const DAY = 86400000;
-const TODAY = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
+const todayStart = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
+let TODAY = todayStart();
 const WD = ['일', '월', '화', '수', '목', '금', '토'];
+
+/** 페이지를 자정 넘겨 열어둬도 D-day가 전날 기준으로 남지 않게 다시 계산한다. */
+let midnightRefreshTimer = null;
+function initMidnightRefresh() {
+  if (midnightRefreshTimer) clearTimeout(midnightRefreshTimer);
+  const now = new Date();
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 1);
+  midnightRefreshTimer = setTimeout(() => {
+    TODAY = todayStart();
+    if (state.M && state.M.companies) state.M.companies.forEach(updateCompanyDeadline);
+    const repaintWhenIdle = () => {
+      if (typeof syncBlockedByEditing === 'function' && syncBlockedByEditing()) {
+        setTimeout(repaintWhenIdle, 60000);
+        return;
+      }
+      if (state.M) render();
+    };
+    repaintWhenIdle();
+    initMidnightRefresh();
+  }, Math.max(1000, next.getTime() - now.getTime()));
+}
 
 /** 엑셀 serial(1899-12-30 기준) → Date. 날짜가 아니면 null */
 function toDate(v) {
@@ -574,6 +596,11 @@ const LOG_KEY = APP_STORAGE_KEY + ':activityLogs';
 let sheetActivityLogs = [];
 const activityLogFilters = { q: '', source: '', type: '', success: '' };
 
+function storedWebOperatorName() {
+  try { return String(localStorage.getItem(APP_STORAGE_KEY + ':webOperatorName') || '').trim(); }
+  catch { return ''; }
+}
+
 function getLocalActivityLogs() {
   try {
     const saved = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
@@ -608,8 +635,7 @@ function getActivityLogs() {
     if (!unique.has(key)) unique.set(key, log);
   });
   return [...unique.values()]
-    .sort((a, b) => String(b.time || '').localeCompare(String(a.time || '')))
-    .slice(0, 100);
+    .sort((a, b) => String(b.time || '').localeCompare(String(a.time || '')));
 }
 
 function addLog(actionType, targetName, detailText, tone = 'info', options) {
@@ -626,13 +652,14 @@ function addLog(actionType, targetName, detailText, tone = 'info', options) {
     detail: detailText || '',
     tone: tone,
     source: opts.source || '웹',
+    actor: opts.actor || storedWebOperatorName() || '웹 사용자',
     success: opts.success !== false,
     before: opts.before || '',
     after: opts.after || '',
     error: opts.error || ''
   };
   logs.unshift(entry);
-  if (logs.length > 100) logs.pop(); // 최근 100건 보관
+  if (logs.length > 500) logs.length = 500; // 브라우저 임시 로그는 저장 용량을 고려해 최근 500건 보관
   try { localStorage.setItem(LOG_KEY, JSON.stringify(logs)); }
   catch { toast('작업 로그를 브라우저에 저장하지 못했습니다.'); }
   renderActivityLogs();
@@ -646,8 +673,8 @@ function clearActivityLogs() {
 }
 
 function activityTypeGroup(type) {
-  if (['ADD', 'EDIT', 'CANCEL', 'RESTORE', 'EXTEND', 'updateCompany'].includes(type)) return 'company';
-  if (['DOC', 'COACH_DOC'].includes(type)) return 'document';
+  if (['ADD', 'EDIT', 'CANCEL', 'RESTORE', 'EXTEND', 'addCompany', 'updateCompany', 'updateExtension'].includes(type)) return 'company';
+  if (['DOC', 'COACH_DOC', 'updateDocs', 'updateCoachDocs'].includes(type)) return 'document';
   if (['SYNC', 'SETTING'].includes(type)) return 'sync';
   if (['SHEET_EDIT', 'SHEET_CHANGE'].includes(type)) return 'sheet';
   return '';
@@ -702,7 +729,8 @@ function renderActivityLogs() {
       CANCEL: '신청취소', RESTORE: '취소 복원', DOC: '서류 변경',
       COACH_DOC: '코치 서류', EXTEND: '기한 연장', SETTING: '설정 변경',
       SHEET_EDIT: '셀 직접 수정', SHEET_CHANGE: '시트 구조 변경',
-      updateCompany: '정보 수정'
+      addCompany: '기업 추가', updateCompany: '정보 수정', updateExtension: '기한 연장',
+      updateDocs: '서류 변경', updateCoachDocs: '코치 서류'
     };
     const badgeType = typeLabels[log.type] || log.type || '기타';
     const before = activityDiffText(log.before);

@@ -7,6 +7,7 @@ const WRITE_ENDPOINT_KEY = LS_KEY + ':writeEndpoint';
 const BASE_YEAR_KEY = LS_KEY + ':baseYear';
 const EXTENSION_KEY = LS_KEY + ':twoWeekExtensions';
 const LAST_SYNC_KEY = LS_KEY + ':lastSuccessfulSync';
+const WEB_OPERATOR_KEY = LS_KEY + ':webOperatorName';
 const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q/edit';
 /*
  * 저장용 Apps Script 주소.
@@ -90,8 +91,10 @@ function readExtensions() {
 }
 let twoWeekExtensions = readExtensions();
 function updateCompanyDeadline(company) {
-  // 예전 브라우저 저장값은 새 시트 열로 옮길 때까지 함께 인정한다.
-  const sheetValue = filled(company.extensionRaw) || !!twoWeekExtensions[company.name];
+  // 시트에 «2주 연장» 열이 생긴 뒤에는 시트 값만 정답으로 사용한다.
+  // 예전 브라우저 저장값은 아직 그 열이 없는 옛 시트에서만 호환용으로 인정한다.
+  const legacyValue = !company.extensionStored && !!twoWeekExtensions[company.name];
+  const sheetValue = filled(company.extensionRaw) || legacyValue;
   company.extended = !!(company.end && sheetValue);
   company.effectiveEnd = company.end && company.extended ? addDays(company.end, 14) : company.end;
   company.dday = ACTIVE.has(company.status) ? daysFromToday(company.effectiveEnd) : null;
@@ -292,6 +295,7 @@ async function fetchSheetData(endpoint) {
 const SYNC_DIALOG = $('#syncDialog');
 const SYNC_ENDPOINT = $('#sheetEndpoint');
 const SYNC_WRITE_ENDPOINT = $('#sheetWriteEndpoint');
+const SYNC_OPERATOR = $('#webOperatorName');
 const SYNC_STATE = $('#syncState');
 let syncReturnFocus = null;
 
@@ -303,6 +307,7 @@ function openSyncDialog() {
   syncReturnFocus = document.activeElement;
   SYNC_ENDPOINT.value = localStorage.getItem(SHEET_ENDPOINT_KEY) || DEFAULT_SHEET_URL;
   SYNC_WRITE_ENDPOINT.value = writeEndpoint();
+  SYNC_OPERATOR.value = localStorage.getItem(WEB_OPERATOR_KEY) || '';
   setSyncState('');
   SYNC_DIALOG.classList.add('open');
   SYNC_DIALOG.setAttribute('aria-hidden', 'false');
@@ -426,7 +431,13 @@ function requestSheetWrite(endpoint, action, payload) {
   const callback = `__sheetWrite_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const requestId = makeRequestId(action);
   const sentPayload = { ...(payload || {}), _requestId: requestId, _source: 'web' };
-  const audit = writeAuditMeta(action, sentPayload);
+  const operator = String(localStorage.getItem(WEB_OPERATOR_KEY) || '').trim();
+  let audit = writeAuditMeta(action, sentPayload);
+  if (audit) {
+    // 호출부가 _audit를 따로 만들지 않은 일반 저장도 실제 작업자 이름이 시트 로그까지 전달돼야 한다.
+    sentPayload._audit = { ...audit, actor: audit.actor || operator || '웹 사용자' };
+    audit = sentPayload._audit;
+  }
   const url = new URL(clean);
   url.searchParams.set('action', action);
   url.searchParams.set('payload', JSON.stringify(sentPayload));
@@ -443,6 +454,7 @@ function requestSheetWrite(endpoint, action, payload) {
       addLog(audit.type || 'EDIT', audit.target || '공통', detail, success ? (audit.tone || 'info') : 'bad', {
         requestId,
         source: '웹',
+        actor: (audit && audit.actor) || operator || '웹 사용자',
         success,
         before: audit.before || '',
         after: audit.after || '',
@@ -487,7 +499,7 @@ function requestSheetWrite(endpoint, action, payload) {
 async function refreshActivityLogsFromSheet(options) {
   const opts = options || {};
   try {
-    const response = await requestSheetWrite(writeEndpoint(), 'getAuditLogs', { limit: 100 });
+    const response = await requestSheetWrite(writeEndpoint(), 'getAuditLogs', { limit: 'all' });
     if (typeof setSheetActivityLogs === 'function') setSheetActivityLogs(response.logs || []);
     paintAuditHealth(response.auditStatus);
     if (!opts.silent) toast(`시트 감사 로그 ${response.logs ? response.logs.length : 0}건을 불러왔습니다.`);

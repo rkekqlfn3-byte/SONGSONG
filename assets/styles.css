@@ -845,7 +845,8 @@ tbody tr.sel td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
 }
 .sync-dialog.open{opacity:1;visibility:visible}
 .sync-panel{
-  width:min(560px,100%);overflow:hidden;border:1px solid var(--border);border-radius:18px;
+  width:min(560px,100%);max-height:calc(100vh - 40px);overflow:hidden;
+  display:flex;flex-direction:column;border:1px solid var(--border);border-radius:18px;
   background:var(--surface);box-shadow:0 24px 70px rgba(7,15,28,.28);
   transform:translateY(8px) scale(.985);transition:transform .2s ease;
 }
@@ -854,7 +855,7 @@ tbody tr.sel td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
 .sync-head>div{flex:1}
 .sync-head .eyebrow{margin-bottom:4px;color:var(--accent);font-size:9px;font-weight:800;letter-spacing:.14em}
 .sync-head h2{font-size:19px;letter-spacing:-.025em}
-.sync-body{padding:20px 22px}
+.sync-body{padding:20px 22px;overflow-y:auto}
 .sync-body label{display:block;margin-bottom:6px;color:var(--ink-2);font-size:11px;font-weight:700}
 .sync-body .sync-label-secondary{margin-top:18px}
 .sync-body input{width:100%}
@@ -864,7 +865,7 @@ tbody tr.sel td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
 .sync-state.show{display:block;background:var(--wash);color:var(--accent-ink)}
 .sync-state.ok{background:color-mix(in srgb,var(--good) 10%,transparent);color:var(--good)}
 .sync-state.bad{background:color-mix(in srgb,var(--critical) 10%,transparent);color:var(--critical)}
-.sync-actions{display:flex;align-items:center;gap:8px;padding:13px 22px 20px}
+.sync-actions{display:flex;align-items:center;gap:8px;padding:13px 22px 20px;flex:none}
 .sync-actions .spacer{flex:1}
 
 /* 기업 추가 */
@@ -1076,7 +1077,8 @@ tbody tr.sel td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
   .pipe{grid-template-columns:repeat(3,1fr)}
   .mail-grid{grid-template-columns:1fr}
 }
-@media(max-width:900px){
+/* 표가 오른쪽에서 잘리지 않도록 중간 폭부터 카드형으로 전환한다. */
+@media(max-width:1180px){
   .mobile-cards table,.mobile-cards tbody{display:block}
   .mobile-cards thead{display:none}
   .mobile-cards tbody{display:grid;gap:10px}

@@ -27,7 +27,7 @@
  *   ?action=updateExtension&payload=... 기업 종료기한 2주 연장 여부 수정
  */
 
-const VERSION = '2026-07-26-ux6';
+const VERSION = '2026-07-26-ux7';
 
 const SPREADSHEET_ID = '1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q';
 /*
@@ -177,7 +177,10 @@ function doGet(e) {
     if (action === 'diag') return response_({ ok: true, version: VERSION, sheets: diag_() }, e);
     if (action === 'getAuditLogs') {
       const requested = JSON.parse((e.parameter && e.parameter.payload) || '{}');
-      const limit = Math.min(Math.max(parseInt(requested.limit || e.parameter.limit, 10) || 100, 1), 500);
+      const requestedLimit = requested.limit || (e.parameter && e.parameter.limit) || 100;
+      const limit = String(requestedLimit).toLowerCase() === 'all'
+        ? 'all'
+        : Math.min(Math.max(parseInt(requestedLimit, 10) || 100, 1), 5000);
       return response_({
         ok: true,
         version: VERSION,
@@ -809,8 +812,12 @@ function auditPayloadAfter_(payload) {
 function auditRecord_(action, payload, result, success, error) {
   const audit = payload && payload._audit ? payload._audit : {};
   const target = audit.target || payload.companyName || payload.originalCompanyName || payload.coachName || '공통';
-  let actor = audit.actor || payload.owner || '';
-  try { actor = Session.getActiveUser().getEmail() || actor; } catch (e) {}
+  // 기업의 내부 담당자(payload.owner)와 실제 웹 작업자는 다를 수 있다.
+  // 웹은 설정에 저장한 작업자 이름을 _audit.actor로 보내고, 없으면 «웹 사용자»로 남긴다.
+  let actor = audit.actor || '';
+  if (!actor) {
+    try { actor = Session.getActiveUser().getEmail() || ''; } catch (e) {}
+  }
   return {
     requestId: payload._requestId || '',
     actor: actor || '웹 사용자',
@@ -868,7 +875,9 @@ function getAuditLogs_(limit) {
   const book = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheet = book.getSheetByName(AUDIT_SHEET);
   if (!sheet || sheet.getLastRow() < 2) return [];
-  const count = Math.min(limit || 100, sheet.getLastRow() - 1);
+  const count = limit === 'all'
+    ? sheet.getLastRow() - 1
+    : Math.min(limit || 100, sheet.getLastRow() - 1);
   const start = sheet.getLastRow() - count + 1;
   const rows = sheet.getRange(start, 1, count, AUDIT_HEADERS.length).getDisplayValues();
   return rows.reverse().map(function (row) {

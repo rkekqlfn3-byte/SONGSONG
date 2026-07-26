@@ -55,6 +55,7 @@
       try { localStorage.setItem(WRITE_ENDPOINT_KEY, normalizeWriteEndpoint(writeRaw)); }
       catch (e) { setSyncState(e.message, 'bad'); return; }
     }
+    try { localStorage.setItem(WEB_OPERATOR_KEY, SYNC_OPERATOR.value.trim()); } catch {}
     const ok = await syncFromSheet(SYNC_ENDPOINT.value, { inDialog: true, saveEndpoint: true, reason: 'manual', force: true });
     if (ok) closeSyncDialog();
   };
@@ -236,6 +237,7 @@
   const endpoint = localStorage.getItem(SHEET_ENDPOINT_KEY) || DEFAULT_SHEET_URL;
   syncFromSheet(endpoint, { silent: true, saveEndpoint: true, reason: 'boot' });
   initAutoSync();
+  initMidnightRefresh();
   renderActivityLogs();
   // 작업 이력 건수는 패널을 열기 전에도 맞아야 한다.
   // 열 때만 불러오면 실제로 기록이 있어도 화면에는 0으로 보인다.
