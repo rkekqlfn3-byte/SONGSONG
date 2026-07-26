@@ -237,4 +237,7 @@
   syncFromSheet(endpoint, { silent: true, saveEndpoint: true, reason: 'boot' });
   initAutoSync();
   renderActivityLogs();
+  // 작업 이력 건수는 패널을 열기 전에도 맞아야 한다.
+  // 열 때만 불러오면 실제로 기록이 있어도 화면에는 0으로 보인다.
+  refreshActivityLogsFromSheet({ silent: true }).catch(error => console.error(error));
 })();

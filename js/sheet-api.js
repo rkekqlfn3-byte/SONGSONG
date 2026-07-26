@@ -186,8 +186,18 @@ function gvizCellValue(cell) {
   if (!cell || cell.v == null) return '';
   const value = cell.v;
   if (typeof value === 'string') {
-    const date = value.match(/^Date\((\d+),(\d+),(\d+)/);
+    const date = value.match(/^Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+))?/);
     if (date) {
+      /*
+       * 시간만 넣은 칸(예: 10:00)은 구글이 «1899-12-30 10:00» 으로 돌려준다.
+       * 연·월·일만 보고 숫자로 바꾸면 0이 되어 시간이 통째로 사라지므로,
+       * 기준일이면 날짜가 아니라 시:분으로 읽는다.
+       */
+      const isEpochDate = +date[1] === 1899 && +date[2] === 11 && +date[3] === 30;
+      if (isEpochDate) {
+        const hh = +(date[4] || 0), mm = +(date[5] || 0);
+        return (hh || mm) ? `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}` : '';
+      }
       const serial = Date.UTC(+date[1], +date[2], +date[3]) / DAY + 25569;
       return String(Math.round(serial));
     }
@@ -203,11 +213,12 @@ function gvizCellValue(cell) {
  * headers=0 을 반드시 붙인다 — 빼면 gviz가 헤더를 몇 줄로 볼지 스스로 추측해서
  * 탭마다 행이 밀리고, 헤더가 데이터로 섞여 들어온다.
  */
-function loadGvizSheet(spreadsheetId, name) {
+function loadGvizSheet(spreadsheetId, name, range) {
   const callback = `__sheetSync_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const url = new URL(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq`);
   url.searchParams.set('sheet', name);
   url.searchParams.set('headers', '0');
+  if (range) url.searchParams.set('range', range);
   url.searchParams.set('tqx', `out:json;responseHandler:${callback}`);
   url.searchParams.set('_', Date.now());
   return new Promise((resolve, reject) => {
@@ -241,12 +252,37 @@ function loadGvizSheet(spreadsheetId, name) {
   });
 }
 
+/*
+ * gviz는 열마다 자료형을 하나로 정하고, 거기에 안 맞는 칸은 빈칸으로 돌려준다.
+ * 그래서 «컨설팅시작»(날짜 열), «근로자수»(숫자 열) 같은 글자 헤더가 통째로 사라진다.
+ * 헤더 행만 따로 읽으면 그 한 줄엔 글자만 있어 전부 살아 있으므로, 그것으로 덮어쓴다.
+ * 이게 있어야 열을 이름으로 찾을 수 있고, 중간에 열이 끼어들어도 어긋나지 않는다.
+ */
+async function loadSourceHeaderRow(spreadsheetId, name) {
+  try {
+    const rows = await loadGvizSheet(spreadsheetId, name, `A${SOURCE_HEADER_ROW}:BZ${SOURCE_HEADER_ROW}`);
+    return rows[0] || null;
+  } catch { return null; }   // 실패해도 예전처럼 위치로 읽으면 된다
+}
+
 async function fetchSheetData(endpoint) {
   const clean = normalizeEndpoint(endpoint);
   const spreadsheetId = clean.match(/\/spreadsheets\/d\/([A-Za-z0-9_-]+)/)[1];
-  const values = await Promise.all(GVIZ_SHEETS.map(name => loadGvizSheet(spreadsheetId, name)));
+  const [values, sourceHeader] = await Promise.all([
+    Promise.all(GVIZ_SHEETS.map(name => loadGvizSheet(spreadsheetId, name))),
+    loadSourceHeaderRow(spreadsheetId, TAB_SOURCE),
+  ]);
   const sheets = {};
   GVIZ_SHEETS.forEach((name, i) => { sheets[name] = values[i]; });
+
+  const grid = sheets[TAB_SOURCE];
+  if (sourceHeader && grid && grid[SOURCE_HEADER_ROW - 1]) {
+    const current = grid[SOURCE_HEADER_ROW - 1];
+    // 따로 읽은 헤더가 더 온전하므로, 빈칸으로 온 자리만 채워 넣는다
+    grid[SOURCE_HEADER_ROW - 1] = current.map((cell, i) => cell || sourceHeader[i] || '');
+    for (let i = current.length; i < sourceHeader.length; i++) grid[SOURCE_HEADER_ROW - 1].push(sourceHeader[i] || '');
+  }
+
   const raw = { generatedAt: iso(TODAY), sheets };
   if (raw && raw.error) throw new Error(raw.error);
   normalize(raw); // 화면을 바꾸기 전에 시트 구조부터 검증

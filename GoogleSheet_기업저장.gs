@@ -27,7 +27,7 @@
  *   ?action=updateExtension&payload=... 기업 종료기한 2주 연장 여부 수정
  */
 
-const VERSION = '2026-07-26-ux3';
+const VERSION = '2026-07-26-ux5';
 
 const SPREADSHEET_ID = '1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q';
 /*
@@ -308,10 +308,27 @@ function sourceColumns_(sheet) {
   const columns = {};
   Object.keys(base).forEach(function (key) { columns[key] = base[key]; });
   if (sourceHeader) {
+    /*
+     * 헤더 이름으로 열을 찾는다. 여기서 찾은 값이 위치 기반 기본값을 덮어쓴다.
+     * 핵심 열까지 이름으로 찾아야 «화면은 맞게 보이는데 시트에는 엉뚱한 칸에 저장»되는 일이 없다.
+     * (대시보드 쪽 js/core.js 의 SOURCE_EXTRA_HEADERS 와 같은 이름을 쓴다)
+     */
     const extraHeaders = {
-      visitOwner: '담당',
-      visitDate: '일자',
-      visitTime: '시간'
+      status: ['진행현황'],
+      owner: ['코치별 담당'],       // 옛 이름 «담당자»는 기업 담당자와 겹쳐서 넣지 않는다
+      companyName: ['기업명'],
+      coachName: ['코치'],
+      coachEmail: ['메일'],
+      coachPhone: ['연락처'],
+      contactName: ['기업 담당자'],
+      contactTitle: ['직급'],
+      contactPhone: ['전화번호'],
+      contactEmail: ['이메일'],
+      startDate: ['컨설팅시작', '컨설팅 시작'],
+      endDate: ['종료기한', '종료 기한'],
+      visitOwner: ['방문 담당', '담당'],   // 시트에서 «담당» → «방문 담당» 으로 바뀜
+      visitDate: ['일자'],
+      visitTime: ['시간']
     };
     COMPANY_SOURCE_COLUMNS.concat(CONSULTATION_COLUMNS).forEach(function (def) {
       extraHeaders[def.key] = def.aliases || [def.header];
@@ -746,9 +763,19 @@ function columnLetter_(index) {
   return out;
 }
 
+/*
+ * yyyy-mm-dd 만 날짜로 인정한다.
+ * new Date(2026, 1, 30) 은 오류가 아니라 3월 2일로 조용히 넘어가므로,
+ * 만들어진 날짜가 입력한 연·월·일과 같은지 되짚어 «없는 날짜»를 걸러낸다.
+ */
 function parseDate_(value) {
   const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  return match ? new Date(+match[1], +match[2] - 1, +match[3], 12, 0, 0) : '';
+  if (!match) return '';
+  const year = +match[1], month = +match[2], day = +match[3];
+  const date = new Date(year, month - 1, day, 12, 0, 0);
+  const rolled = date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day;
+  if (rolled) throw new Error('없는 날짜입니다: ' + match[0]);
+  return date;
 }
 
 function cleanText_(value) {

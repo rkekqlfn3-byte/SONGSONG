@@ -232,7 +232,31 @@ const SRC_DASHBOARD = {
   coachPhone: 11   // L 코치 연락처
 };
 
+/** 기업 원본 탭에서 헤더가 적힌 줄 (1행은 그룹 제목, 3행부터 데이터) */
+const SOURCE_HEADER_ROW = 2;
+
+/*
+ * 헤더 이름으로 열을 찾는다. 여기서 찾은 값이 위치 기반 기본값(SRC_LEGACY 등)을 덮어쓴다.
+ * 헤더가 없으면 예전처럼 위치를 쓰므로, 옛 시트도 그대로 열린다.
+ *
+ * «담당자»가 A(내부)와 S(기업) 두 곳에 있던 시절에는 이름만으로 구분할 수 없어
+ * 핵심 열을 전부 위치로 찾았다. 지금은 «코치별 담당 / 방문 담당 / 기업 담당자»로
+ * 이름이 갈라져서 이름으로 찾을 수 있고, 그래서 열이 끼어들어도 어긋나지 않는다.
+ */
 const SOURCE_EXTRA_HEADERS = {
+  // 핵심 열 — 이름이 고유해진 뒤로 위치 대신 이름으로 찾는다
+  owner: ['코치별 담당'],       // 옛 이름 «담당자»는 기업 담당자와 겹쳐서 후보에 넣지 않는다
+  status: ['진행현황'],
+  name: ['기업명'],
+  coachName: ['코치'],
+  coachEmail: ['메일'],
+  coachPhone: ['연락처'],
+  contactName: ['기업 담당자'],
+  contactTitle: ['직급'],
+  contactPhone: ['전화번호'],
+  contactEmail: ['이메일'],
+  start: ['컨설팅시작', '컨설팅 시작'],
+  end: ['종료기한', '종료 기한'],
   employeeCount: ['근로자수'],
   // 공백 유무가 다른 중복 헤더가 있으면 시트의 가장 앞쪽 열을 사용한다.
   workplaceNumber: ['사업장 관리번호', '사업장관리번호'],
@@ -241,7 +265,7 @@ const SOURCE_EXTRA_HEADERS = {
   // «HRD4U ID»는 의도적으로 후보에 넣지 않는다.
   hrd4uId: ['HRD4U'],
   twoWeekExtension: ['2주 연장'],
-  visitOwner: ['담당'],
+  visitOwner: ['방문 담당', '담당'],   // 시트에서 «담당» → «방문 담당» 으로 바뀜
   visitDate: ['일자'],
   visitTime: ['시간'],
   consult1Date: ['1차 컨설팅일'],

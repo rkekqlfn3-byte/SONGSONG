@@ -333,13 +333,19 @@ function editDocCell(td, company, def, seed) {
     paintDocCell(td, company, def);
     td.focus();
   };
-  const commit = async (dCol, dRow) => {
+  const commit = (dCol, dRow) => {
     if (settled) return;
     settled = true;
     const raw = input.value.trim();
     close();
-    if (raw === (seed != null ? seed : current) && seed == null) paintDocCell(td, company, def);
-    else await commitDocCell(td, company, def, raw);
+    const unchanged = raw === (seed != null ? seed : current) && seed == null;
+    /*
+     * 저장을 기다리지 않고 커서를 먼저 옮긴다.
+     * 시트 왕복이 1~3초라 기다리면 한 칸마다 손이 멈춘다.
+     * 값은 commitDocCell 안에서 이미 화면에 먼저 반영되고, 실패하면 그 칸만 되돌아온다.
+     */
+    if (unchanged) paintDocCell(td, company, def);
+    else commitDocCell(td, company, def, raw).catch(error => console.error(error));
     if (dCol || dRow) focusDocCell(moveDocCell(td, dCol, dRow));
   };
 
