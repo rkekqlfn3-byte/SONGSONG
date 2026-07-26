@@ -77,8 +77,9 @@
   // 기업 추가
   buildCompanyDocFields();
   $('#btnAddCompany').onclick = openCompanyDialog;
-  $('#companyClose').onclick = closeCompanyDialog;
-  $('#companyCancel').onclick = closeCompanyDialog;
+  // 인자를 넘기지 않아야 «입력 중이면 확인» 이 걸린다 (클릭 이벤트를 그대로 넘기면 안 된다)
+  $('#companyClose').onclick = () => closeCompanyDialog();
+  $('#companyCancel').onclick = () => closeCompanyDialog();
   $('#companyOpenSettings').onclick = openSyncDialog;
   $('#companyFormTabs').onclick = event => {
     const button = event.target.closest('[data-company-step]');

@@ -256,6 +256,13 @@ td.dt{font-variant-numeric:tabular-nums;color:var(--ink-2);white-space:nowrap}
   background:var(--raised);color:var(--accent-ink);font-size:10.5px;font-weight:700;cursor:pointer;
 }
 .row-edit-company:hover{border-color:var(--accent);background:var(--wash)}
+/* 신청취소 — 되돌릴 수 있지만 눈에 띄어야 하므로 색만 구분한다 */
+.row-cancel-company{color:var(--critical)}
+.row-cancel-company:hover{
+  border-color:var(--critical);
+  background:color-mix(in srgb,var(--critical) 10%,transparent);
+}
+.company-name{min-width:250px}
 .dim{color:var(--ink-3)}
 .strong{font-weight:600}
 .count-note{font-size:12px;color:var(--ink-3);margin:10px 2px 0}

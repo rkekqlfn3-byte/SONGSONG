@@ -418,7 +418,10 @@ function viewCompanies() {
     { k: 'status', h: '진행현황', cell: c => badge(c.status) },
     { k: 'name', h: '기업명', cls: 'company-name', cell: c =>
       `<div class="company-name-wrap"><span class="strong">${esc(c.name)}</span>` +
-      `<button type="button" class="row-edit-company" data-company-edit="${esc(c.name)}" aria-label="${esc(c.name)} 정보 수정">수정</button></div>` },
+      `<button type="button" class="row-edit-company" data-company-edit="${esc(c.name)}" aria-label="${esc(c.name)} 정보 수정">수정</button>` +
+      (c.status === '신청취소' ? '' :
+        `<button type="button" class="row-edit-company row-cancel-company" data-company-cancel="${esc(c.name)}" aria-label="${esc(c.name)} 신청취소 처리">취소</button>`) +
+      `</div>` },
     { k: 'owner', h: '담당자', cls: 'nowrap', cell: c => c.owner ? esc(c.owner) : '<span class="dim">미배정</span>' },
     { k: 'contact', h: '기업 담당자', cls: 'nowrap', cell: c => c.contact.name ? `${esc(c.contact.name)} <span class="dim">${esc(c.contact.title)}</span>` : '<span class="dim">—</span>' },
     { k: 'phone', h: '연락처', sort: false, cls: 'dt', cell: c => esc(c.contact.phone.split('\n')[0] || '—') },
@@ -453,6 +456,13 @@ function viewCompanies() {
         e.stopPropagation();
         const company = state.M.companies.find(c => c.name === btn.dataset.companyEdit);
         if (company) openCompanyEditDialog(company);
+      };
+    });
+    built.querySelectorAll('[data-company-cancel]').forEach(btn => {
+      btn.onclick = e => {
+        e.stopPropagation();                     // 행 클릭(상세 열기)과 겹치지 않게
+        const company = state.M.companies.find(c => c.name === btn.dataset.companyCancel);
+        if (company) cancelCompany(company);
       };
     });
     return built;

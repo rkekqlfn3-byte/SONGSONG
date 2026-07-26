@@ -7,7 +7,16 @@ const WRITE_ENDPOINT_KEY = LS_KEY + ':writeEndpoint';
 const BASE_YEAR_KEY = LS_KEY + ':baseYear';
 const EXTENSION_KEY = LS_KEY + ':twoWeekExtensions';
 const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q/edit';
-const DEFAULT_WRITE_URL = 'https://script.google.com/macros/s/AKfycbxF5kDX3-LgfDWV2HmppfizLKD8TUajpsOL42LGLp-d58a5zTOTddp2mvlM4IZI8GJdqg/exec';
+/*
+ * 저장용 Apps Script 주소.
+ *
+ * ⚠️ 이 주소를 아는 사람은 로그인 없이 시트를 고칠 수 있습니다.
+ *    저장소를 다시 «공개»로 바꾸거나 이 폴더를 외부에 넘기면 그대로 새어나갑니다.
+ *    그런 일이 생기면 Apps Script에서 기존 배포를 «보관처리»하고 새 주소를 받으세요.
+ *
+ * 이전 주소 AKfycbxF5kDX3… 은 공개 저장소에 올라갔던 이력이 있어 폐기했습니다.
+ */
+const DEFAULT_WRITE_URL = 'https://script.google.com/macros/s/AKfycbwK8dm8mUev8vMZeLLHWRbQI-p0viyqIMzIuuVP7nxjA2V-CEd9Nc4dd02vexJvsZ8x3w/exec';
 
 /** 기업별 2주 연장 여부 — 시트 원본은 건드리지 않고 이 브라우저에 별도로 보관한다 */
 function readExtensions() {

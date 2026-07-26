@@ -194,7 +194,7 @@ async function readXlsx(file) {
 /* ============================================================
    3. 정규화 — 원시 그리드 → 화면이 쓰는 모델
    ============================================================ */
-const TAB_DOCS = '서류', TAB_SOURCE = 'AI훈련로드맵', TAB_SOURCE_LEGACY = '작성', TAB_COACH = '훈련코치', TAB_MAIL = '메일DB';
+const TAB_DOCS = '서류', TAB_SOURCE = '작성', TAB_SOURCE_LEGACY = 'AI훈련로드맵', TAB_COACH = '훈련코치', TAB_MAIL = '메일DB';
 
 /** 예전 '작성' 탭 열 인덱스(0부터) */
 const SRC_LEGACY = {
@@ -206,6 +206,7 @@ const SRC_LEGACY = {
   coachPhone: 5,   // F 연락처
   start: 6,        // G 컨설팅 시작
   end: 7,          // H 종료기한
+  employeeCount: 9,// J 근로자수 (GViz가 숫자 열의 텍스트 헤더를 누락할 때 쓰는 안전한 기본값)
   contactName: 18, // S 담당자
   contactTitle: 19,// T 직급
   contactPhone: 20,// U 전화번호
@@ -407,7 +408,9 @@ function normalize(raw) {
       consultations: [
         {
           dateRaw: cell(r, 'consult1Date'),
-          time: cell(r, 'consult1Time'),
+          // 기존 작성 탭은 1차 시간이 별도 확장 열이 아니라 방문 '시간' 열(R)에 저장되어 있다.
+          // 새 '1차 시간' 열의 값을 우선하고, 비어 있을 때만 기존 열을 읽어 이전 데이터도 보존한다.
+          time: cell(r, 'consult1Time') || cell(r, 'visitTime'),
           visit: filled(cell(r, 'consult1Visit')),
           owner: cell(r, 'consult1Owner'),
         },

@@ -333,7 +333,7 @@ async function commitDocCell(td, company, def, entered, opts) {
     markCellFailed(td, entered, '6/22 처럼 월/일로 적어주세요');
     return false;
   }
-  const lock = company.name + ' ' + def.k;
+  const lock = company.name + '\u0000' + def.k;
   if (docSaving.has(lock)) return false;        // 같은 칸에 요청이 겹치지 않게
   if (def.byCoach) {
     if (!company.coach) {
@@ -361,10 +361,18 @@ async function commitDocCell(td, company, def, entered, opts) {
   try {
     await requestSheetWrite(writeEndpoint(), 'updateDocs', { companyName: company.name, docs });
     if (td) td.classList.remove('saving');
-    // O 표시는 클릭 한 번에 저장되므로 실수를 되돌릴 길을 남긴다
-    if (def.type === 'mark' && !(opts && opts.isUndo)) {
+    /*
+     * 되돌리기를 띄우는 기준 — 되돌릴 «잃은 값»이 있을 때만.
+     *   O 표시  : 클릭 한 번에 저장되므로 항상
+     *   날짜 칸 : 원래 값이 있던 칸을 고치거나 지웠을 때 (빈 칸을 채우는 건 잃는 게 없다)
+     * 빈 칸을 연속으로 채우는 작업에서는 조용한 «N칸 저장됨» 쪽으로 흘려보낸다.
+     */
+    const lostValue = filled(rollback[def.k]);
+    if (!(opts && opts.isUndo) && (def.type === 'mark' || lostValue)) {
       const back = docCellText(rollback[def.k]);
-      toastUndo(`${company.name} · ${def.label} ${sent ? '제출 표시' : '표시 해제'}`,
+      const now = def.type === 'mark' ? (sent ? '제출 표시' : '표시 해제')
+        : sent ? docCellText(localDocValue(def.k, sent)) : '지움';
+      toastUndo(`${company.name} · ${def.label} ${now}`,
         () => commitDocCell(td, company, def, back, { isUndo: true }));
     } else {
       noteSaved();

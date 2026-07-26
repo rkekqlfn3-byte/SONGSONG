@@ -2,7 +2,8 @@
  * AI훈련로드맵 대시보드 — 시트 연동 API
  *
  * 시트 구조
- *   AI훈련로드맵  사람이 직접 입력하는 원본. 기업 추가·수정은 여기에 쓴다.
+ *   작성       사람이 직접 입력하는 원본. 기업 추가·수정은 여기에 쓴다.
+ *              (탭 이름이 «AI훈련로드맵» 이어도 자동으로 찾는다)
  *   훈련코치   코치 원본. 사람이 직접 입력한다.
  *   서류       기업·코치 정보는 작성/훈련코치에서 수식으로, 서류 날짜는 손으로 입력
  *
@@ -25,10 +26,26 @@
  *   ?action=updateCoachDocs&payload=... 코치 공통 서식8·9·10·통장사본 수정
  */
 
-const VERSION = '2026-07-26j';
+const VERSION = '2026-07-26k';
 
 const SPREADSHEET_ID = '1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q';
-const SOURCE_SHEET = 'AI훈련로드맵';
+/*
+ * 기업 원본 탭.
+ * 그동안 이름이 «작성» ↔ «AI훈련로드맵» 으로 오간 적이 있어 둘 다 받아들인다.
+ * 앞에 적힌 이름부터 찾으므로, 실제 쓰는 탭을 앞에 두면 된다.
+ * (열 순서가 달라도 sourceColumns_ 가 헤더를 읽어 알아서 맞춘다)
+ */
+const SOURCE_SHEET_NAMES = ['작성', 'AI훈련로드맵'];
+const SOURCE_SHEET = SOURCE_SHEET_NAMES[0];
+
+/** 원본 탭을 찾는다. 이름이 바뀌어도 후보 안에 있으면 계속 동작한다 */
+function sourceSheet_(book) {
+  for (let i = 0; i < SOURCE_SHEET_NAMES.length; i++) {
+    const found = book.getSheetByName(SOURCE_SHEET_NAMES[i]);
+    if (found) return found;
+  }
+  throw new Error('기업 원본 탭을 찾을 수 없습니다. (' + SOURCE_SHEET_NAMES.join(' 또는 ') + ')');
+}
 const COACH_SHEET = '훈련코치';
 const DOCUMENT_SHEET = '서류';
 
@@ -162,18 +179,18 @@ function doGet(e) {
 /** 각 탭이 실제로 몇 행 몇 열인지 — 범위를 벗어나는 오류의 원인을 보려고 */
 function diag_() {
   const book = SpreadsheetApp.openById(SPREADSHEET_ID);
-  return [SOURCE_SHEET, COACH_SHEET, DOCUMENT_SHEET].map(function (name) {
-    const sheet = book.getSheetByName(name);
-    if (!sheet) return { name: name, found: false };
-    return {
-      name: name,
-      found: true,
-      maxRows: sheet.getMaxRows(),
-      maxColumns: sheet.getMaxColumns(),
-      lastRow: sheet.getLastRow(),
-      lastColumn: sheet.getLastColumn()
-    };
+  // 실제 탭 이름을 통째로 돌려준다.
+  // 이름이 한 글자만 달라도 스크립트는 «없다»고 하는데, 화면으로는 구분이 안 되기 때문이다.
+  const all = book.getSheets().map(function (s) {
+    return { name: s.getName(), lastRow: s.getLastRow(), lastColumn: s.getLastColumn() };
   });
+  let sourceName = '(못 찾음)';
+  try { sourceName = sourceSheet_(book).getName(); } catch (e) {}
+  return {
+    시트전체: all,
+    쓰는탭: { 기업원본: sourceName, 코치: COACH_SHEET, 서류: DOCUMENT_SHEET },
+    후보: SOURCE_SHEET_NAMES
+  };
 }
 
 /**
@@ -184,8 +201,7 @@ function diag_() {
  */
 function setupFormulas_() {
   const book = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const source = book.getSheetByName(SOURCE_SHEET);
-  if (!source) throw new Error(SOURCE_SHEET + ' 탭을 찾을 수 없습니다.');
+  const source = sourceSheet_(book);
   const columns = sourceColumns_(source);
   const applied = [];
 
@@ -197,7 +213,7 @@ function setupFormulas_() {
     if (height > 0) sheet.getRange(spec.row, spec.col, height, spec.width).clearContent();
 
     const text = spec.text
-      .replace(/@원본/g, "'" + SOURCE_SHEET + "'")
+      .replace(/@원본/g, "'" + source.getName() + "'")
       .replace(/@코치/g, "'" + COACH_SHEET + "'")
       .replace(/@STATUS/g, columnLetter_(columns.status))
       .replace(/@OWNER/g, columnLetter_(columns.owner))
@@ -383,8 +399,7 @@ function addCompany_(data) {
   lock.waitLock(30000);
   try {
     const book = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const source = book.getSheetByName(SOURCE_SHEET);
-    if (!source) throw new Error(SOURCE_SHEET + ' 탭을 찾을 수 없습니다.');
+    const source = sourceSheet_(book);
     const scheduleChanged = data.scheduleChanged === true || String(data.scheduleChanged).toLowerCase() === 'true';
     ensureCompanyInfoColumns_(source);
     if (scheduleChanged) ensureConsultationColumns_(source);
@@ -444,8 +459,7 @@ function updateCompany_(data) {
   lock.waitLock(30000);
   try {
     const book = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const source = book.getSheetByName(SOURCE_SHEET);
-    if (!source) throw new Error(SOURCE_SHEET + ' 탭을 찾을 수 없습니다.');
+    const source = sourceSheet_(book);
     const hasScheduleFlag = Object.prototype.hasOwnProperty.call(data, 'scheduleChanged');
     const scheduleChanged = data.scheduleChanged === true || String(data.scheduleChanged).toLowerCase() === 'true';
     ensureCompanyInfoColumns_(source);

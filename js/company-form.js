@@ -342,6 +342,7 @@ function openCompanyDialog() {
   setCompanyState(`${getBaseYear()}년 기준 · 날짜는 6/22 처럼 월/일만 적으면 됩니다.`, 'ok');
   COMPANY_DIALOG.classList.add('open');
   COMPANY_DIALOG.setAttribute('aria-hidden', 'false');
+  rememberCompanyForm();
   requestAnimationFrame(() => $('#newCompanyName').focus());
 }
 
@@ -387,13 +388,123 @@ function openCompanyEditDialog(company) {
   setCompanyState(`${company.name} 정보를 수정합니다. 날짜는 6/22처럼 월/일로 입력하세요.`, 'ok');
   COMPANY_DIALOG.classList.add('open');
   COMPANY_DIALOG.setAttribute('aria-hidden', 'false');
+  rememberCompanyForm();
   requestAnimationFrame(() => $('#newStatus').focus());
 }
-function closeCompanyDialog() {
+/**
+ * 잘못 등록한 기업을 «신청취소»로 돌린다.
+ * 행을 지우지 않으므로 기록은 남고, 진행 중 집계·마감 관리에서는 빠진다.
+ * 되돌리려면 수정 창에서 진행현황만 다시 바꾸면 된다.
+ */
+async function cancelCompany(company) {
+  if (!company) return false;
+  if (company.status === '신청취소') { toast(`${company.name} — 이미 신청취소 상태입니다.`); return false; }
+
+  const ok = confirm(
+    `«${company.name}» 을(를) 신청취소로 바꿉니다.\n\n` +
+    `· 목록과 시트에는 그대로 남습니다\n` +
+    `· 진행 중 건수·마감 관리에서는 빠집니다\n` +
+    `· 되돌리려면 수정에서 진행현황만 바꾸면 됩니다\n\n계속할까요?`
+  );
+  if (!ok) return false;
+
+  const endpoint = writeEndpoint();
+  const consult = company.consultations || [{}, {}];
+  const payload = {
+    originalCompanyName: company.name,
+    companyName: company.name,
+    status: '신청취소',
+    owner: company.owner || '',
+    contactName: company.contact.name || '',
+    contactTitle: company.contact.title || '',
+    contactPhone: company.contact.phone || '',
+    contactEmail: company.contact.email || '',
+    employeeCount: (company.workplace && company.workplace.employeeCount) || '',
+    workplaceNumber: (company.workplace && company.workplace.managementNumber) || '',
+    companyAddress: (company.workplace && company.workplace.address) || '',
+    agencyBranch: (company.workplace && company.workplace.agencyBranch) || '',
+    hrd4uId: (company.workplace && company.workplace.hrd4uId) || '',
+    startDate: company.start ? iso(company.start) : '',
+    endDate: company.end ? iso(company.end) : '',
+    coachName: company.coachName || '',
+    coachEmail: company.coachEmail || '',
+    coachPhone: company.coachPhone || '',
+    scheduleChanged: false,          // 일정 열은 건드리지 않는다
+  };
+
+  toast(`${company.name} 신청취소 처리 중…`);
+  try {
+    await requestSheetWrite(endpoint, 'updateCompany', payload);
+    const before = company.status;
+    company.status = '신청취소';
+    render();
+    toastUndo(`${company.name} — 신청취소 처리됨`, () => restoreCompanyStatus(company, before));
+    return true;
+  } catch (e) {
+    console.error(e);
+    toast('신청취소 실패 — ' + (e.message || '저장 연결을 확인하세요'));
+    return false;
+  }
+}
+/** 신청취소를 되돌린다 — 바꾸기 전 진행현황으로 */
+async function restoreCompanyStatus(company, status) {
+  try {
+    await requestSheetWrite(writeEndpoint(), 'updateCompany', {
+      originalCompanyName: company.name,
+      companyName: company.name,
+      status: status || '검토요청',
+      owner: company.owner || '',
+      contactName: company.contact.name || '',
+      contactTitle: company.contact.title || '',
+      contactPhone: company.contact.phone || '',
+      contactEmail: company.contact.email || '',
+      employeeCount: (company.workplace && company.workplace.employeeCount) || '',
+      workplaceNumber: (company.workplace && company.workplace.managementNumber) || '',
+      companyAddress: (company.workplace && company.workplace.address) || '',
+      agencyBranch: (company.workplace && company.workplace.agencyBranch) || '',
+      hrd4uId: (company.workplace && company.workplace.hrd4uId) || '',
+      startDate: company.start ? iso(company.start) : '',
+      endDate: company.end ? iso(company.end) : '',
+      coachName: company.coachName || '',
+      coachEmail: company.coachEmail || '',
+      coachPhone: company.coachPhone || '',
+      scheduleChanged: false,
+    });
+    company.status = status;
+    render();
+    toast(`${company.name} — ${status}(으)로 되돌림`);
+  } catch (e) {
+    console.error(e);
+    toast('되돌리기 실패 — ' + (e.message || '저장 연결을 확인하세요'));
+  }
+}
+
+/**
+ * 창을 열 때의 입력 상태를 기억해 두고, 닫을 때 달라졌는지 비교한다.
+ * 세 탭을 다 채운 뒤 바깥을 잘못 눌러 전부 날아가는 일을 막는다.
+ */
+let companyFormSnapshot = '';
+function companyFormFingerprint() {
+  return [...COMPANY_FORM.querySelectorAll('input, select, textarea')]
+    .map(box => (box.type === 'checkbox' || box.type === 'radio') ? (box.checked ? '1' : '0') : box.value)
+    .join('');
+}
+function rememberCompanyForm() { companyFormSnapshot = companyFormFingerprint(); }
+function companyFormDirty() {
+  return COMPANY_DIALOG.classList.contains('open') && companyFormFingerprint() !== companyFormSnapshot;
+}
+
+/** force: true 는 저장이 끝난 뒤처럼 물어볼 필요가 없을 때 쓴다 */
+function closeCompanyDialog(options) {
   const wasOpen = COMPANY_DIALOG.classList.contains('open');
+  if (wasOpen && !(options && options.force) && companyFormDirty()) {
+    const label = companyEditTarget ? '수정 중인 내용' : '입력 중인 내용';
+    if (!confirm(`${label}이 있습니다.\n저장하지 않고 닫으면 사라집니다.\n\n닫을까요?`)) return false;
+  }
   COMPANY_DIALOG.classList.remove('open');
   COMPANY_DIALOG.setAttribute('aria-hidden', 'true');
   if (wasOpen && companyReturnFocus && document.contains(companyReturnFocus)) companyReturnFocus.focus();
+  return true;
 }
 /** 서류 입력 칸 → { 컬럼키: 값 }. 날짜는 yyyy-mm-dd, O 표시는 'O', 약정기간은 '시작 ~ 12/31' */
 function collectDocValues() {
@@ -557,7 +668,7 @@ async function saveCompany() {
       delete twoWeekExtensions[oldName];
       try { localStorage.setItem(EXTENSION_KEY, JSON.stringify(twoWeekExtensions)); } catch {}
     }
-    closeCompanyDialog();
+    closeCompanyDialog({ force: true });        // 저장이 끝났으니 다시 묻지 않는다
     const synced = await syncFromSheet(localStorage.getItem(SHEET_ENDPOINT_KEY) || DEFAULT_SHEET_URL, { silent: true });
     if (synced) {
       go('comp', { q: companyName, status: '', owner: '', coach: '' });
