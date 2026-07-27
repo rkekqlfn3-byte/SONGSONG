@@ -29,7 +29,7 @@
  *   ?action=syncStatuses&payload=...   1차 컨설팅일 기준 진행현황 자동 갱신
  */
 
-const VERSION = '2026-07-27-read1';
+const VERSION = '2026-07-27-cache1';
 const API_CAPABILITIES = ['syncStatuses'];
 
 const SPREADSHEET_ID = '1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q';
@@ -240,6 +240,7 @@ function doGet(e) {
       throw new Error('지원하지 않는 요청입니다.');
     }
 
+    clearDataCache_();   // 방금 시트를 고쳤으니 보관해 둔 내용은 버린다
     const auditLogged = skipDefaultAudit ? !!result.auditLogged : appendAuditLog_(auditRecord_(action, payload, result, true, ''));
     return response_(Object.assign({ ok: true, version: VERSION, auditLogged: auditLogged }, result), e);
   } catch (error) {
@@ -394,6 +395,38 @@ function cellText_(v) {
   return String(v);
 }
 
+/*
+ * 방금 읽은 탭 내용을 잠깐 보관해 둔다.
+ * 자동 동기화가 여러 사람에게서 계속 오는데, 그때마다 시트를 다시 읽으면
+ * 요청 한 번에 3~4초가 더 붙는다. 보관해 둔 게 있으면 그걸 바로 돌려준다.
+ * 누가 무언가를 «저장»하면 즉시 버려서, 바뀐 내용이 늦게 보이는 일은 없다.
+ */
+const DATA_CACHE_TTL = 90;               // 초
+const DATA_CACHE_PREFIX = 'grid:';
+function dataCacheKeys_() {
+  return DATA_TABS.concat(['AI훈련로드맵']).map(function (n) { return DATA_CACHE_PREFIX + n; });
+}
+function clearDataCache_() {
+  try { CacheService.getScriptCache().removeAll(dataCacheKeys_()); } catch (error) {}
+}
+function tabGridCached_(book, name) {
+  const key = DATA_CACHE_PREFIX + name;
+  let cache = null;
+  try { cache = CacheService.getScriptCache(); } catch (error) {}
+  if (cache) {
+    const hit = cache.get(key);
+    if (hit) {
+      try { return JSON.parse(hit); } catch (error) {}
+    }
+  }
+  const grid = tabGrid_(book, name);
+  if (cache && grid) {
+    // 100KB를 넘으면 보관이 실패한다 — 실패해도 매번 읽으면 되므로 조용히 넘어간다
+    try { cache.put(key, JSON.stringify(grid), DATA_CACHE_TTL); } catch (error) {}
+  }
+  return grid;
+}
+
 /** 탭 하나를 글자 격자로 — 뒤쪽 빈 줄은 잘라내 응답을 가볍게 한다 */
 function tabGrid_(book, name) {
   const sheet = book.getSheetByName(name);
@@ -413,13 +446,13 @@ function readAllData_() {
   const sheets = {};
   const missing = [];
   DATA_TABS.forEach(function (name) {
-    const grid = tabGrid_(book, name);
+    const grid = tabGridCached_(book, name);
     if (grid === null) { missing.push(name); return; }
     sheets[name] = grid;
   });
   // 원본 탭은 이름이 «작성» ↔ «AI훈련로드맵» 으로 오간 적이 있다
   if (!sheets['작성']) {
-    const alt = tabGrid_(book, 'AI훈련로드맵');
+    const alt = tabGridCached_(book, 'AI훈련로드맵');
     if (alt) sheets['작성'] = alt;
   }
   if (!sheets['작성']) throw new Error('기업 원본 탭을 찾지 못했습니다.');
