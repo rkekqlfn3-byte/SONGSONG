@@ -28,7 +28,7 @@
  *   ?action=updateMemo&payload=...      기업 메모만 수정
  */
 
-const VERSION = '2026-07-27-memo1';
+const VERSION = '2026-07-27-status1';
 
 const SPREADSHEET_ID = '1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q';
 /*
@@ -206,7 +206,8 @@ function doGet(e) {
       // scheduleSaved = 컨설팅 일정까지 같은 요청에서 처리했는지 (앱이 이것으로 새 버전인지 판별한다)
       result = {
         company: updated.company, docRow: updated.docRow, wrote: updated.wrote,
-        scheduleSaved: updated.scheduleRow != null, row: updated.scheduleRow
+        scheduleSaved: updated.scheduleRow != null, row: updated.scheduleRow,
+        statusSaved: updated.scheduleRow != null && !!cleanText_(payload.newStatus)
       };
     } else if (action === 'updateCoachDocs') {
       const updated = updateCoachDocs_(payload);
@@ -714,13 +715,26 @@ function updateExtension_(data) {
  * 컨설팅 일정(1·2차 날짜·시간·동행)과 컨설팅 시작·종료기한만 원본 탭에 반영한다.
  * scheduleChanged가 없으면 아무것도 하지 않는다. 기업 기본정보는 건드리지 않는다.
  */
+/**
+ * 앱이 자동으로 올려 보내는 진행현황만 받는다.
+ * 아무 값이나 진행현황 칸에 들어가지 않도록 아는 값인지 확인한다.
+ */
+function autoStatusValue_(raw) {
+  const value = cleanText_(raw);
+  if (!value) return '';
+  const allowed = ['검토요청', '검토완료', '컨설팅진행', '보고서제출', '지급준비', '지급완료'];
+  if (allowed.indexOf(value) < 0) throw new Error('알 수 없는 진행현황입니다: ' + value);
+  return value;
+}
+
 function applyScheduleToSource_(book, companyName, data) {
   const changed = data.scheduleChanged === true || String(data.scheduleChanged).toLowerCase() === 'true';
-  if (!changed) return null;
+  const newStatus = autoStatusValue_(data.newStatus);
+  if (!changed && !newStatus) return null;
   const source = sourceSheet_(book);
-  ensureConsultationColumns_(source);
+  if (changed) ensureConsultationColumns_(source);
   const columns = sourceColumns_(source);
-  const schedule = consultationValues_(data);
+  const schedule = changed ? consultationValues_(data) : null;
 
   const lastRow = source.getLastRow();
   if (lastRow < SOURCE_FIRST_ROW) return null;
@@ -734,15 +748,19 @@ function applyScheduleToSource_(book, companyName, data) {
   if (!targetRow) return null;
 
   writeSourceRow_(source, targetRow, columns, function (rowValues) {
-    setConsultationRowValues_(rowValues, columns, schedule);
-    if (Object.prototype.hasOwnProperty.call(data, 'startDate') && columns.startDate) {
-      rowValues[columns.startDate - 1] = parseDate_(data.startDate);
+    if (schedule) {
+      setConsultationRowValues_(rowValues, columns, schedule);
+      if (Object.prototype.hasOwnProperty.call(data, 'startDate') && columns.startDate) {
+        rowValues[columns.startDate - 1] = parseDate_(data.startDate);
+      }
+      if (Object.prototype.hasOwnProperty.call(data, 'endDate') && columns.endDate) {
+        rowValues[columns.endDate - 1] = parseDate_(data.endDate);
+      }
     }
-    if (Object.prototype.hasOwnProperty.call(data, 'endDate') && columns.endDate) {
-      rowValues[columns.endDate - 1] = parseDate_(data.endDate);
-    }
+    // 수행일지 1·2차와 보고서가 모두 들어오면 앱이 «보고서제출»을 함께 보낸다
+    if (newStatus && columns.status) rowValues[columns.status - 1] = newStatus;
   });
-  formatConsultationCells_(source, targetRow, columns);
+  if (schedule) formatConsultationCells_(source, targetRow, columns);
   return targetRow;
 }
 

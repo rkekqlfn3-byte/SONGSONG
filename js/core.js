@@ -415,6 +415,19 @@ const ACTIVE_STATUS_FILTER = '__active__';
  * (지급 절차가 남아 있어도 마감 독촉 대상은 아니다)
  */
 const REPORT_DONE_STATUS = new Set(['보고서제출', '지급준비', '지급완료']);
+
+/**
+ * 실시 단계 서류가 모두 들어왔는가 — 수행일지 1차·2차 + AI훈련로드맵 보고서.
+ * 세 개가 다 차면 진행현황을 «보고서제출»로 자동으로 올린다.
+ * 이미 그 뒤 단계(지급준비·지급완료)면 뒤로 되돌리지 않는다.
+ */
+const consultingDocsDone = docs =>
+  !!docs && filled(docs.log1) && filled(docs.log2) && filled(docs.report);
+const AUTO_REPORT_FROM = new Set(['검토요청', '검토완료', '컨설팅진행']);
+/** 자동으로 바꿀 진행현황 — 바꿀 필요가 없으면 빈 값 */
+const autoReportStatus = company =>
+  company && consultingDocsDone(company.docs) && AUTO_REPORT_FROM.has(company.status)
+    ? '보고서제출' : '';
 const reportSubmitted = company =>
   !!company && (filled(company.docs && company.docs.report) || REPORT_DONE_STATUS.has(company.status));
 

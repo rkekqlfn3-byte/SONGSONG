@@ -437,6 +437,9 @@ async function commitDocCell(td, company, def, entered, opts) {
         extra: readDrawerConsultInputs(def.linkConsult, company),
       }])
     : null;
+  // 수행일지 1·2차와 보고서가 모두 채워졌으면 진행현황도 같은 요청에서 «보고서제출»로 올린다
+  const newStatus = autoReportStatus(company);
+  const statusBefore = company.status;
 
   try {
     const beforeText = filled(rollback[def.k]) ? docCellText(rollback[def.k]) : '미제출';
@@ -447,16 +450,20 @@ async function commitDocCell(td, company, def, entered, opts) {
       _audit: {
         type: 'DOC',
         target: company.name,
-        detail: `${def.label}: ${beforeText} → ${afterText}` + (schedule ? ` · 컨설팅 일정 ${schedule.summary}` : ''),
+        detail: `${def.label}: ${beforeText} → ${afterText}` + (schedule ? ` · 컨설팅 일정 ${schedule.summary}` : '') +
+          (newStatus ? ` · 진행현황 ${statusBefore} → ${newStatus} (서류 완료 자동)` : ''),
         tone: 'info',
         before: Object.assign({ [def.k]: beforeText }, schedule ? schedule.before : {}),
         after: Object.assign({ [def.k]: afterText }, schedule ? schedule.after : {})
       }
-    }, schedule ? schedule.fields : {}));
+    }, schedule ? schedule.fields : {}, newStatus ? { newStatus } : {}));
     if (td) td.classList.remove('saving');
     const scheduleSaved = schedule && scheduleWasSaved(response);
-    if (scheduleSaved) { schedule.apply(); render(); }
-    const alsoSchedule = scheduleSaved ? ` · ${def.linkConsult}차 컨설팅 일정도 맞춤` : '';
+    if (scheduleSaved) schedule.apply();
+    const statusSaved = newStatus && applyAutoStatus(company, newStatus, response);
+    if (scheduleSaved || statusSaved) render();
+    const alsoSchedule = (scheduleSaved ? ` · ${def.linkConsult}차 컨설팅 일정도 맞춤` : '') +
+      (statusSaved ? ' · 진행현황 보고서제출' : '');
     /*
      * 되돌리기를 띄우는 기준 — 되돌릴 «잃은 값»이 있을 때만.
      *   O 표시  : 클릭 한 번에 저장되므로 항상
@@ -470,7 +477,7 @@ async function commitDocCell(td, company, def, entered, opts) {
         : sent ? docCellText(localDocValue(def.k, sent)) : '지움';
       toastUndo(`${company.name} · ${def.label} ${now}${alsoSchedule}`,
         () => commitDocCell(td, company, def, back, { isUndo: true }));
-    } else if (scheduleSaved) {
+    } else if (scheduleSaved || statusSaved) {
       toast(`${company.name} · ${def.label} ${docCellText(localDocValue(def.k, sent))} 저장${alsoSchedule}`);
     } else {
       noteSaved();
@@ -707,6 +714,22 @@ function docRowValueText(company, def) {
  * 서류와 «같은 요청»으로 보낸 컨설팅 일정이 실제로 시트에 들어갔는지 확인한다.
  * 시트 스크립트가 아직 옛 버전이면 이 표시가 없으므로, 반영된 척하지 않고 알려준다.
  */
+/**
+ * 서류가 다 차서 올린 진행현황이 실제로 시트에 들어갔는지 확인하고, 화면 값도 맞춘다.
+ * 시트 스크립트가 옛 버전이면 반영되지 않으므로 바꾸지 않고 알려준다.
+ */
+function applyAutoStatus(company, newStatus, response) {
+  if (!newStatus) return false;
+  if (!(response && response.statusSaved)) {
+    toast('진행현황 자동 변경은 아직 반영되지 않았습니다 — 시트 스크립트를 새 버전으로 배포해주세요.');
+    return false;
+  }
+  company.status = newStatus;
+  updateCompanyDeadline(company);
+  toast(`${company.name} — 실시 서류가 모두 채워져 진행현황을 «${newStatus}»로 바꿨습니다.`);
+  return true;
+}
+
 function scheduleWasSaved(response) {
   if (response && response.scheduleSaved) return true;
   toast('컨설팅 일정은 아직 반영되지 않았습니다 — 시트 스크립트를 새 버전으로 배포해주세요.');
@@ -802,6 +825,9 @@ async function saveAllDrawerDocs(company) {
     company.docCount = DOC_DEFS.filter(d => filled(company.docs[d.k])).length;
     updateCompanyDeadline(company);   // 보고서를 내면 기한 경과에서 바로 빠진다
     repaintDocCells([company.name], keys);
+    // 실시 서류(수행일지 1·2차 + 보고서)가 다 찼으면 진행현황도 같은 요청에서 올린다
+    const newStatus = autoReportStatus(company);
+    const statusBefore = company.status;
     try {
       const response = await requestSheetWrite(writeEndpoint(), 'updateDocs', Object.assign({
         companyName: company.name,
@@ -811,15 +837,17 @@ async function saveAllDrawerDocs(company) {
           target: company.name,
           detail: (mine.length ? `서류 ${mine.length}칸 한 번에 저장 — ` +
             mine.map(x => `${x.def.label}: ${x.entered || '지움'}`).join(', ') : '컨설팅 일정 수정') +
-            (schedule ? ` · 컨설팅 일정 ${schedule.summary}` : ''),
+            (schedule ? ` · 컨설팅 일정 ${schedule.summary}` : '') +
+            (newStatus ? ` · 진행현황 ${statusBefore} → ${newStatus} (서류 완료 자동)` : ''),
           tone: 'info',
           before: Object.assign({}, rollback, schedule ? schedule.before : {}),
           after: Object.assign({}, docs, schedule ? schedule.after : {})
         }
-      }, schedule ? schedule.fields : {}));
+      }, schedule ? schedule.fields : {}, newStatus ? { newStatus } : {}));
       const scheduleSaved = schedule && scheduleWasSaved(response);
       saved += mine.length + (scheduleSaved ? scheduleOnly.length : 0);
       if (scheduleSaved) schedule.apply();
+      if (newStatus) applyAutoStatus(company, newStatus, response);
     } catch (e) {
       console.error(e);
       keys.forEach(k => { company.docs[k] = rollback[k]; });
