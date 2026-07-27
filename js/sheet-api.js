@@ -272,7 +272,55 @@ async function loadSourceHeaderRow(spreadsheetId, name) {
   } catch { return null; }   // 실패해도 예전처럼 위치로 읽으면 된다
 }
 
+/* ============================================================
+   자료 읽기 — 두 갈래
+     1) 스크립트 경유 : 시트를 «제한됨»으로 잠가도 읽힌다 (앞으로 쓸 길)
+     2) 시트 직접 읽기 : 예전 방식. 시트가 링크로 열려 있어야 한다
+   먼저 성공한 쪽을 기억해 다음부터는 그 길로 바로 간다.
+   ============================================================ */
+const READ_PATH_KEY = LS_KEY + ':readPath';
+const readPath = () => localStorage.getItem(READ_PATH_KEY) || '';
+function rememberReadPath(path) {
+  try { localStorage.setItem(READ_PATH_KEY, path); } catch {}
+}
+let lastReadPathLabel = '';
+
+/** 스크립트에서 탭 전체를 받아 온다 */
+async function fetchViaScript() {
+  const res = await requestSheetWrite(writeEndpoint(), 'getData', {});
+  if (!res || !res.sheets || !Object.keys(res.sheets).length) {
+    throw new Error('스크립트가 자료를 돌려주지 않았습니다.');
+  }
+  const raw = { generatedAt: res.generatedAt || iso(TODAY), sheets: res.sheets };
+  normalize(raw);                       // 화면을 바꾸기 전에 구조부터 검증
+  return raw;
+}
+
 async function fetchSheetData(endpoint) {
+  const paths = [
+    { name: 'script', label: '스크립트 경유', run: () => fetchViaScript() },
+    { name: 'gviz', label: '시트 직접 읽기', run: () => fetchViaGviz(endpoint) },
+  ];
+  // 지난번에 통한 길을 앞에 세운다
+  const preferred = readPath();
+  if (preferred === 'gviz') paths.reverse();
+
+  let firstError = null;
+  for (const path of paths) {
+    try {
+      const raw = await path.run();
+      rememberReadPath(path.name);
+      lastReadPathLabel = path.label;
+      return raw;
+    } catch (error) {
+      console.warn(`${path.label} 실패`, error);
+      if (!firstError) firstError = error;
+    }
+  }
+  throw firstError || new Error('자료를 불러오지 못했습니다.');
+}
+
+async function fetchViaGviz(endpoint) {
   const clean = normalizeEndpoint(endpoint);
   const spreadsheetId = clean.match(/\/spreadsheets\/d\/([A-Za-z0-9_-]+)/)[1];
   const [values, sourceHeader] = await Promise.all([
@@ -405,11 +453,11 @@ async function syncFromSheetOnce(endpoint, opts) {
       return true;
     }
     if (opts.saveEndpoint) localStorage.setItem(SHEET_ENDPOINT_KEY, clean);
-    const sourceLabel = opts.reason === 'manual'
-      ? 'Google Sheet · 수동 동기화'
-      : opts.reason === 'after-write'
-        ? 'Google Sheet · 저장 후 동기화'
-        : 'Google Sheet · 자동 동기화';
+    const how = opts.reason === 'manual'
+      ? '수동 동기화'
+      : opts.reason === 'after-write' ? '저장 후 동기화' : '자동 동기화';
+    // 어느 길로 받아왔는지 함께 보여준다 — 시트 잠금 뒤에도 잘 도는지 눈으로 확인할 수 있게
+    const sourceLabel = `Google Sheet · ${how}${lastReadPathLabel ? ` · ${lastReadPathLabel}` : ''}`;
     applyData(raw, sourceLabel, true);
     const completedAt = new Date().toISOString();
     try { localStorage.setItem(LAST_SYNC_KEY, completedAt); } catch {}

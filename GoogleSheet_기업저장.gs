@@ -29,7 +29,7 @@
  *   ?action=syncStatuses&payload=...   1차 컨설팅일 기준 진행현황 자동 갱신
  */
 
-const VERSION = '2026-07-27-consult2';
+const VERSION = '2026-07-27-read1';
 const API_CAPABILITIES = ['syncStatuses'];
 
 const SPREADSHEET_ID = '1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q';
@@ -201,6 +201,11 @@ function doGet(e) {
     }
 
     payload = JSON.parse((e.parameter && e.parameter.payload) || '{}');
+    if (action === 'getData') {
+      // 화면에 뿌릴 자료 읽기 — 시트를 잠가도 이 경로로는 읽힌다
+      const data = readAllData_();
+      return response_({ ok: true, version: VERSION, generatedAt: data.generatedAt, sheets: data.sheets, missing: data.missing }, e);
+    }
     let result;
     if (action === 'setupFormulas') {
       result = { applied: setupFormulas_() };
@@ -361,6 +366,69 @@ function installConsultationStatusAutomation() {
   const message = '1차 컨설팅일 자동 상태 변경 설치 완료 · 현재 ' + first.updated + '건 변경';
   console.log(message);
   return message;
+}
+
+/* ============================================================
+   자료 읽기 — 브라우저가 시트를 직접 읽지 않고 여기를 거친다
+   ------------------------------------------------------------
+   이 스크립트는 시트 주인 권한으로 돌기 때문에, 시트 공유를
+   «제한됨»으로 잠가도 자료를 읽어 올 수 있다.
+   돌려주는 모양은 예전 방식(gviz)과 똑같이 맞춘다 —
+   날짜는 시트 일련번호 문자열, 시간만 든 칸은 «HH:MM», 나머지는 글자.
+   ============================================================ */
+const DATA_TABS = ['서류', '작성', '훈련코치', '메일DB'];
+
+function cellText_(v) {
+  if (v === null || v === undefined || v === '') return '';
+  if (v instanceof Date) {
+    const y = v.getFullYear(), m = v.getMonth(), d = v.getDate();
+    // 시간만 넣은 칸은 구글이 1899-12-30 기준으로 돌려준다
+    if (y === 1899 && m === 11 && d === 30) {
+      const hh = v.getHours(), mm = v.getMinutes();
+      if (!hh && !mm) return '';
+      return ('0' + hh).slice(-2) + ':' + ('0' + mm).slice(-2);
+    }
+    const serial = Math.round((Date.UTC(y, m, d) - Date.UTC(1899, 11, 30)) / 86400000);
+    return String(serial);
+  }
+  return String(v);
+}
+
+/** 탭 하나를 글자 격자로 — 뒤쪽 빈 줄은 잘라내 응답을 가볍게 한다 */
+function tabGrid_(book, name) {
+  const sheet = book.getSheetByName(name);
+  if (!sheet) return null;
+  const lastRow = sheet.getLastRow(), lastCol = sheet.getLastColumn();
+  if (!lastRow || !lastCol) return [];
+  const values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  const grid = values.map(function (row) { return row.map(cellText_); });
+  let end = grid.length;
+  while (end > 0 && grid[end - 1].every(function (c) { return c === ''; })) end--;
+  return grid.slice(0, end);
+}
+
+/** 화면이 쓰는 탭 전부를 한 번에 돌려준다 */
+function readAllData_() {
+  const book = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheets = {};
+  const missing = [];
+  DATA_TABS.forEach(function (name) {
+    const grid = tabGrid_(book, name);
+    if (grid === null) { missing.push(name); return; }
+    sheets[name] = grid;
+  });
+  // 원본 탭은 이름이 «작성» ↔ «AI훈련로드맵» 으로 오간 적이 있다
+  if (!sheets['작성']) {
+    const alt = tabGrid_(book, 'AI훈련로드맵');
+    if (alt) sheets['작성'] = alt;
+  }
+  if (!sheets['작성']) throw new Error('기업 원본 탭을 찾지 못했습니다.');
+  const zone = book.getSpreadsheetTimeZone() || Session.getScriptTimeZone() || 'Asia/Seoul';
+  return {
+    generatedAt: Utilities.formatDate(new Date(), zone, 'yyyy-MM-dd'),
+    sheets: sheets,
+    missing: missing
+  };
 }
 
 /** 각 탭이 실제로 몇 행 몇 열인지 — 범위를 벗어나는 오류의 원인을 보려고 */
