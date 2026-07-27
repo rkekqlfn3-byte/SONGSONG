@@ -410,6 +410,15 @@ const ACTIVE = new Set(['검토요청', '검토완료', '컨설팅진행', '보�
 const ACTIVE_STATUS_FILTER = '__active__';
 
 /**
+ * 보고서를 낸 건은 «기한 경과»에서 뺀다 — 기한은 보고서까지 끝내라는 기한이기 때문이다.
+ * 서류의 «AI훈련로드맵 보고서» 날짜가 있거나, 진행현황이 보고서제출 이후면 낸 것으로 본다.
+ * (지급 절차가 남아 있어도 마감 독촉 대상은 아니다)
+ */
+const REPORT_DONE_STATUS = new Set(['보고서제출', '지급준비', '지급완료']);
+const reportSubmitted = company =>
+  !!company && (filled(company.docs && company.docs.report) || REPORT_DONE_STATUS.has(company.status));
+
+/**
  * 데이터 행만 골라낸다. 시트마다 위쪽 안내·헤더 줄 수가 다르고 사람이 늘리거나 지우기도 해서,
  * 몇 줄을 건너뛸지 정해두는 대신 «기준 칸이 비었거나 헤더 글자면 건너뛴다»로 판단한다.
  */

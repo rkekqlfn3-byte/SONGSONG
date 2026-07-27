@@ -97,7 +97,10 @@ function updateCompanyDeadline(company) {
   const sheetValue = filled(company.extensionRaw) || legacyValue;
   company.extended = !!(company.end && sheetValue);
   company.effectiveEnd = company.end && company.extended ? addDays(company.end, 14) : company.end;
-  company.dday = ACTIVE.has(company.status) ? daysFromToday(company.effectiveEnd) : null;
+  // 보고서를 낸 건은 기한을 따지지 않는다 (dday = null → 경과·임박 목록에서 빠진다)
+  company.dday = ACTIVE.has(company.status) && !reportSubmitted(company)
+    ? daysFromToday(company.effectiveEnd)
+    : null;
 }
 async function setCompanyExtension(company, enabled) {
   if (!company || !company.end) {

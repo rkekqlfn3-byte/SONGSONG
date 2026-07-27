@@ -425,6 +425,7 @@ async function commitDocCell(td, company, def, entered, opts) {
 
   keys.forEach(k => { company.docs[k] = localDocValue(k, docs[k]); });   // 낙관적 반영
   company.docCount = DOC_DEFS.filter(d => filled(company.docs[d.k])).length;
+  updateCompanyDeadline(company);   // 보고서를 내면 기한 경과에서 바로 빠진다
   repaintDocCells([company.name], keys);
   if (td) td.classList.add('saving');
   docSaving.add(lock);
@@ -479,6 +480,7 @@ async function commitDocCell(td, company, def, entered, opts) {
     console.error(e);
     keys.forEach(k => { company.docs[k] = rollback[k]; });
     company.docCount = DOC_DEFS.filter(d => filled(company.docs[d.k])).length;
+    updateCompanyDeadline(company);   // 보고서를 내면 기한 경과에서 바로 빠진다
     repaintDocCells([company.name], keys);
     markCellFailed(td, entered, e.message || '저장 연결을 확인하세요');
     return false;
@@ -632,6 +634,10 @@ function refreshDrawerDocRow(company, def) {
   if (check) check.checked = has;
   // 약정 시작일을 저장하면 종료일(+28일)도 함께 바뀌므로 그 줄도 같이 맞춘다
   if (def.k === 'teamStart') refreshDrawerDocRow(company, byDocKey('teamEnd'));
+  if (def.k === 'report') {                       // 보고서를 내면 기한 표시도 바로 바뀐다
+    const line = DRAWER.querySelector('[data-deadline-line]');
+    if (line) line.innerHTML = deadlineLineHtml(company);
+  }
   refreshDrawerDocCounts(company);
 }
 /** 단계별 개수와 «서류 7/15» 표시를 지금 값으로 맞춘다 */
@@ -794,6 +800,7 @@ async function saveAllDrawerDocs(company) {
     keys.forEach(k => { rollback[k] = company.docs[k]; });
     keys.forEach(k => { company.docs[k] = localDocValue(k, docs[k]); });
     company.docCount = DOC_DEFS.filter(d => filled(company.docs[d.k])).length;
+    updateCompanyDeadline(company);   // 보고서를 내면 기한 경과에서 바로 빠진다
     repaintDocCells([company.name], keys);
     try {
       const response = await requestSheetWrite(writeEndpoint(), 'updateDocs', Object.assign({
@@ -817,6 +824,7 @@ async function saveAllDrawerDocs(company) {
       console.error(e);
       keys.forEach(k => { company.docs[k] = rollback[k]; });
       company.docCount = DOC_DEFS.filter(d => filled(company.docs[d.k])).length;
+      updateCompanyDeadline(company);   // 보고서를 내면 기한 경과에서 바로 빠진다
       repaintDocCells([company.name], keys);
       mine.forEach(x => { if (x.input) x.input.classList.add('bad'); });
       toast('저장 실패 — ' + (e.message || '저장 연결을 확인하세요'));
@@ -905,6 +913,21 @@ const copyLine = (v, label) => v
   ? `<button class="copy" data-copy="${esc(v)}" data-label="${esc(label)}">${esc(v)}</button>`
   : '<span class="dim">—</span>';
 
+/** 상세창 «종료 기한» 줄 — 보고서를 내면 남은 날짜 표시가 사라지므로 따로 다시 그릴 수 있게 뺐다 */
+function deadlineLineHtml(c) {
+  const dd = c.dday == null
+    ? (reportSubmitted(c) && c.end ? '<span class="dim">보고서 제출 — 기한 관리 종료</span>' : '')
+    : c.dday < 0 ? `<span style="color:var(--critical);font-weight:650">${-c.dday}일 경과</span>`
+      : `<span${c.dday <= 14 ? ' style="font-weight:650"' : ''}>D-${c.dday}</span>`;
+  const deadline = !c.end
+    ? `<span class="dim">${esc(c.endRaw || '미정')}</span>`
+    : c.extended
+      ? `<span class="deadline-original">${korDate(c.end)}</span><span class="deadline-arrow">→</span>` +
+        `<span class="deadline-extended">${korDate(c.effectiveEnd)}</span>`
+      : korDate(c.end);
+  return `${deadline} ${dd}`;
+}
+
 function openCompany(c, docsEditMode) {
   docsEditMode = !!docsEditMode;
   state.comp.sel = c.name;
@@ -947,15 +970,6 @@ function openCompany(c, docsEditMode) {
     return `<div class="stage-head">${st} <span class="dim" data-stage-count="${esc(st)}">${n}/${tot}</span></div>${items}`;
   }).join('');
 
-  const dd = c.dday == null ? '' :
-    c.dday < 0 ? `<span style="color:var(--critical);font-weight:650">${-c.dday}일 경과</span>`
-      : `<span${c.dday <= 14 ? ' style="font-weight:650"' : ''}>D-${c.dday}</span>`;
-  const deadline = !c.end
-    ? `<span class="dim">${esc(c.endRaw || '미정')}</span>`
-    : c.extended
-      ? `<span class="deadline-original">${korDate(c.end)}</span><span class="deadline-arrow">→</span>` +
-        `<span class="deadline-extended">${korDate(c.effectiveEnd)}</span>`
-      : korDate(c.end);
   const consultationLine = (item, fallbackDate) => {
     const date = item && item.date ? korDate(item.date)
       : item && item.dateRaw ? esc(item.dateRaw)
@@ -992,7 +1006,7 @@ function openCompany(c, docsEditMode) {
       <dt>1차 컨설팅</dt><dd data-consult-line="1">${consultationLine(c.consultations[0], c.start)}</dd>
       <dt>2차 컨설팅</dt><dd data-consult-line="2">${consultationLine(c.consultations[1], null)}</dd>
       ${latestVisit ? `<dt>최근 방문</dt><dd>${latestVisit}</dd>` : ''}
-      <dt>종료 기한</dt><dd>${deadline} ${dd}</dd>
+      <dt>종료 기한</dt><dd data-deadline-line>${deadlineLineHtml(c)}</dd>
       <dt>2주 연장</dt><dd><label class="extension-toggle">
         <input type="checkbox" id="extensionCheck"${c.extended ? ' checked' : ''}${c.end ? '' : ' disabled'}>
         <span>14일 연장 적용</span>
