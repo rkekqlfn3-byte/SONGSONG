@@ -84,6 +84,31 @@ function docCellText(v) {
   return cellText(raw);
 }
 
+/**
+ * 시간은 언제나 24시간 표기(10:00 · 15:00)로 맞춘다.
+ * 시트에 «오전 10:00», «오후 3시» 같은 옛 표기가 남아 있어도 같은 모양으로 보이게 한다.
+ */
+function to24Time(raw) {
+  if (raw instanceof Date && !Number.isNaN(raw.getTime())) {
+    return String(raw.getHours()).padStart(2, '0') + ':' + String(raw.getMinutes()).padStart(2, '0');
+  }
+  const text = String(raw == null ? '' : raw).trim();
+  if (!text) return '';
+  const pm = /오후|PM/i.test(text);
+  const am = /오전|AM/i.test(text);
+  const body = text.replace(/오전|오후|AM|PM/gi, '').trim();
+  let hour, minute;
+  let m = body.match(/^(\d{1,2})\s*[:시]\s*(\d{1,2})?\s*분?$/);   // 10:30 · 10시 30분
+  if (m) { hour = Number(m[1]); minute = Number(m[2] || 0); }
+  else if (/^\d{1,2}\s*시?$/.test(body)) { hour = parseInt(body, 10); minute = 0; }   // 10 · 10시
+  else if (/^\d{3,4}$/.test(body)) { hour = Number(body.slice(0, -2)); minute = Number(body.slice(-2)); }  // 1030
+  else return '';
+  if (pm && hour < 12) hour += 12;
+  if (am && hour === 12) hour = 0;
+  if (!(hour >= 0 && hour <= 23) || !(minute >= 0 && minute <= 59)) return '';
+  return String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0');
+}
+
 /** 값이 들어있으면 true (날짜든 O 표시든) */
 const filled = v => v != null && String(v).trim() !== '';
 /** 셀을 화면용 문자열로 — 날짜면 m/d, 아니면 원문 */
@@ -350,8 +375,9 @@ const DOC_DEFS = [
   { k: 'privacy',   i: 12, stage: '확정', label: '개인정보 수집 동의 [서식8]',  short: '서식8\n개인정보', byCoach: 'f8', type: 'date' },
   { k: 'share',     i: 13, stage: '확정', label: '정보공유 동의 [서식9]',      short: '서식9\n정보공유', byCoach: 'f9', type: 'date' },
   { k: 'join',      i: 14, stage: '확정', label: '사업 참여 서약 [서식10]',    short: '서식10\n참여서약', byCoach: 'f10', type: 'date' },
-  { k: 'log1',      i: 15, stage: '실시', label: '컨설팅 수행일지 1차', short: '수행일지\n1차', type: 'date' },
-  { k: 'log2',      i: 16, stage: '실시', label: '컨설팅 수행일지 2차', short: '수행일지\n2차', type: 'date' },
+  // linkConsult = 같은 차수의 컨설팅일을 적으면 이 칸도 같은 날짜로 따라온다
+  { k: 'log1',      i: 15, stage: '실시', label: '컨설팅 수행일지 1차', short: '수행일지\n1차', type: 'date', linkConsult: 1 },
+  { k: 'log2',      i: 16, stage: '실시', label: '컨설팅 수행일지 2차', short: '수행일지\n2차', type: 'date', linkConsult: 2 },
   { k: 'report',    i: 17, stage: '실시', label: 'AI훈련로드맵 보고서', short: '보고서', type: 'date' },
   { k: 'payslip',   i: 18, stage: '지급', label: '수당지급 명세서 [서식7]', short: '수당\n명세서', type: 'mark' },
   { k: 'bankbook',  i: 19, stage: '지급', label: '통장 사본',        short: '통장\n사본', byCoach: 'bank', type: 'mark' },
@@ -466,13 +492,13 @@ function normalize(raw) {
           dateRaw: cell(r, 'consult1Date'),
           // 기존 작성 탭은 1차 시간이 별도 확장 열이 아니라 방문 '시간' 열(R)에 저장되어 있다.
           // 새 '1차 시간' 열의 값을 우선하고, 비어 있을 때만 기존 열을 읽어 이전 데이터도 보존한다.
-          time: cell(r, 'consult1Time') || cell(r, 'visitTime'),
+          time: to24Time(cell(r, 'consult1Time') || cell(r, 'visitTime')),
           visit: filled(cell(r, 'consult1Visit')),
           owner: cell(r, 'consult1Owner'),
         },
         {
           dateRaw: cell(r, 'consult2Date'),
-          time: cell(r, 'consult2Time'),
+          time: to24Time(cell(r, 'consult2Time')),
           visit: filled(cell(r, 'consult2Visit')),
           owner: cell(r, 'consult2Owner'),
         },
@@ -480,7 +506,7 @@ function normalize(raw) {
       latestVisit: {
         owner: cell(r, 'visitOwner'),
         dateRaw: cell(r, 'visitDate'),
-        time: cell(r, 'visitTime'),
+        time: to24Time(cell(r, 'visitTime')),
       },
       extensionRaw: cell(r, 'twoWeekExtension'),
       extensionStored: sourceColumns.twoWeekExtension != null,

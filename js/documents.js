@@ -445,6 +445,18 @@ async function commitDocCell(td, company, def, entered, opts) {
       }
     });
     if (td) td.classList.remove('saving');
+    // 수행일지를 고치면 같은 차수의 컨설팅일도 시트에 같이 맞춘다 (반대 방향 연동)
+    let scheduleSynced = false;
+    if (def.linkConsult && sent) {
+      try {
+        scheduleSynced = await syncConsultDateFromDoc(company, def.linkConsult, sent);
+        if (scheduleSynced) render();
+      } catch (error) {
+        console.error(error);
+        toast(`${def.label}은 저장됐지만 컨설팅일 반영은 실패했습니다 — ${error.message || '저장 연결을 확인하세요'}`);
+      }
+    }
+    const alsoSchedule = scheduleSynced ? ` · ${def.linkConsult}차 컨설팅일도 맞춤` : '';
     /*
      * 되돌리기를 띄우는 기준 — 되돌릴 «잃은 값»이 있을 때만.
      *   O 표시  : 클릭 한 번에 저장되므로 항상
@@ -456,8 +468,10 @@ async function commitDocCell(td, company, def, entered, opts) {
       const back = docCellText(rollback[def.k]);
       const now = def.type === 'mark' ? (sent ? '제출 표시' : '표시 해제')
         : sent ? docCellText(localDocValue(def.k, sent)) : '지움';
-      toastUndo(`${company.name} · ${def.label} ${now}`,
+      toastUndo(`${company.name} · ${def.label} ${now}${alsoSchedule}`,
         () => commitDocCell(td, company, def, back, { isUndo: true }));
+    } else if (scheduleSynced) {
+      toast(`${company.name} · ${def.label} ${docCellText(localDocValue(def.k, sent))} 저장${alsoSchedule}`);
     } else {
       noteSaved();
     }
@@ -537,6 +551,80 @@ async function commitCoachDoc(td, coach, def, sent, opts) {
 
 /* 상세 패널에서 부르는 창구 — 표가 아니라 패널 안에서 고칠 때는 대상 칸이 없다 */
 const saveDocCell = (company, def, entered) => commitDocCell(null, company, def, entered);
+
+/*
+ * 상세창에서 한 칸을 저장했을 때 «그 줄만» 다시 그린다.
+ * 예전에는 상세창 전체를 다시 그려서, 다른 칸에 적어두고 아직 저장하지 않은 내용이 사라졌다.
+ */
+function refreshDrawerDocRow(company, def) {
+  const row = DRAWER.querySelector(`[data-doc-row="${def.k}"]`);
+  if (!row) return;
+  const raw = company.docs[def.k];
+  const has = filled(raw);
+  row.classList.toggle('ok', has);
+  row.classList.toggle('no', !has);
+  const mark = row.querySelector('.mk');
+  if (mark) mark.textContent = has ? '●' : '○';
+  const view = row.querySelector('.vl');
+  if (view) view.textContent = has ? cellText(raw) : '미제출';
+  const input = row.querySelector('[data-doc-input]');
+  if (input) { input.value = docCellText(raw); input.classList.remove('bad'); }
+  const check = row.querySelector('[data-doc-toggle]');
+  if (check) check.checked = has;
+  refreshDrawerDocCounts(company);
+}
+/** 단계별 개수와 «서류 7/15» 표시를 지금 값으로 맞춘다 */
+function refreshDrawerDocCounts(company) {
+  const total = DRAWER.querySelector('[data-doc-total]');
+  if (total) total.textContent = `서류 ${company.docCount}/${DOC_DEFS.length}`;
+  STAGES.forEach(stage => {
+    const box = DRAWER.querySelector(`[data-stage-count="${stage}"]`);
+    if (!box) return;
+    const defs = DOC_DEFS.filter(d => d.stage === stage);
+    box.textContent = `${defs.filter(d => filled(company.docs[d.k])).length}/${defs.length}`;
+  });
+}
+/** 수행일지를 고쳐 컨설팅일이 같이 바뀌었을 때, 상세창 위쪽 일정 줄도 맞춘다 */
+function refreshDrawerConsultLines(company) {
+  [1, 2].forEach(index => {
+    const box = DRAWER.querySelector(`[data-consult-line="${index}"]`);
+    const item = (company.consultations || [])[index - 1];
+    if (!box) return;
+    const fallback = index === 1 ? company.start : null;
+    const date = item && item.date ? korDate(item.date)
+      : item && item.dateRaw ? esc(item.dateRaw)
+      : fallback ? korDate(fallback)
+      : '<span class="dim">미정</span>';
+    const time = item && item.time ? ` ${esc(item.time)}` : '';
+    const visit = item && item.visit
+      ? ` <span class="extension-badge">동행 · ${esc(item.owner || '담당자 미정')}</span>`
+      : '';
+    box.innerHTML = `${date}${time}${visit}`;
+  });
+}
+/** 코치 상세창에서도 저장한 줄만 다시 그린다 */
+function refreshCoachDocRow(coach, def) {
+  const row = DRAWER.querySelector(`[data-coach-doc-row="${def.k}"]`);
+  if (!row) return;
+  const raw = coach[def.byCoach];
+  const has = filled(raw);
+  row.classList.toggle('ok', has);
+  row.classList.toggle('no', !has);
+  const mark = row.querySelector('.mk');
+  if (mark) mark.textContent = has ? '●' : '○';
+  const view = row.querySelector('.vl');
+  if (view) view.textContent = has ? cellText(raw) : '미제출';
+  const input = row.querySelector('[data-coach-doc-input]');
+  if (input) { input.value = docCellText(raw); input.classList.remove('bad'); }
+  const check = row.querySelector('[data-coach-doc-toggle]');
+  if (check) check.checked = has;
+}
+/** 저장 단추를 잠깐 «저장됨»으로 바꿔 알려준다 */
+function flashSaveButton(btn) {
+  btn.textContent = '저장됨';
+  clearTimeout(btn._flashTimer);
+  btn._flashTimer = setTimeout(() => { btn.textContent = '저장'; }, 1200);
+}
 const saveCoachDoc = (coach, def, entered) => {
   const sent = docSendValue(def, entered, getBaseYear());
   if (sent === null) { toast('6/22 처럼 월/일로 적어주세요'); return Promise.resolve(false); }
@@ -605,16 +693,16 @@ function openCompany(c, docsEditMode) {
             <button class="drawer-doc-save" type="button" data-doc-save="${esc(d.k)}">저장</button>
           </div>`;
         }
-        return `<div class="chk doc-row-edit ${has ? 'ok' : 'no'}"><div class="mk">${has ? '●' : '○'}</div>` +
+        return `<div class="chk doc-row-edit ${has ? 'ok' : 'no'}" data-doc-row="${esc(d.k)}"><div class="mk">${has ? '●' : '○'}</div>` +
           `<div class="lb">${esc(d.label)}${d.byCoach ? '<em>코치 공통</em>' : ''}</div>${control}</div>`;
       }
-      return `<div class="chk ${has ? 'ok' : 'no'}"><div class="mk">${has ? '●' : '○'}</div>` +
+      return `<div class="chk ${has ? 'ok' : 'no'}" data-doc-row="${esc(d.k)}"><div class="mk">${has ? '●' : '○'}</div>` +
         `<div class="lb">${esc(d.label)}${d.byCoach ? '<em>코치 공통</em>' : ''}</div>` +
         `<div class="vl">${has ? esc(cellText(c.docs[d.k])) : '미제출'}</div></div>`;
     }).join('');
     const n = DOC_DEFS.filter(d => d.stage === st && filled(c.docs[d.k])).length;
     const tot = DOC_DEFS.filter(d => d.stage === st).length;
-    return `<div class="stage-head">${st} <span class="dim">${n}/${tot}</span></div>${items}`;
+    return `<div class="stage-head">${st} <span class="dim" data-stage-count="${esc(st)}">${n}/${tot}</span></div>${items}`;
   }).join('');
 
   const dd = c.dday == null ? '' :
@@ -656,8 +744,8 @@ function openCompany(c, docsEditMode) {
       <dt>이메일</dt><dd>${c.contact.email.split('\n').map(p => copyLine(p.trim(), '이메일')).join('<br>')}</dd>
     </dl></div>
     <div class="sect"><h4>일정</h4><dl class="kv">
-      <dt>1차 컨설팅</dt><dd>${consultationLine(c.consultations[0], c.start)}</dd>
-      <dt>2차 컨설팅</dt><dd>${consultationLine(c.consultations[1], null)}</dd>
+      <dt>1차 컨설팅</dt><dd data-consult-line="1">${consultationLine(c.consultations[0], c.start)}</dd>
+      <dt>2차 컨설팅</dt><dd data-consult-line="2">${consultationLine(c.consultations[1], null)}</dd>
       ${latestVisit ? `<dt>최근 방문</dt><dd>${latestVisit}</dd>` : ''}
       <dt>종료 기한</dt><dd>${deadline} ${dd}</dd>
       <dt>2주 연장</dt><dd><label class="extension-toggle">
@@ -672,7 +760,7 @@ function openCompany(c, docsEditMode) {
       <dt>이메일</dt><dd>${copyLine(c.coachEmail, '코치 이메일')}</dd>
     </dl></div>
     <div class="sect">
-      <div class="sect-head"><h4>서류 ${c.docCount}/${DOC_DEFS.length}</h4>
+      <div class="sect-head"><h4 data-doc-total>서류 ${c.docCount}/${DOC_DEFS.length}</h4>
         <button class="doc-edit-toggle" type="button" id="editDocs">${docsEditMode ? '완료' : '수정'}</button>
       </div>
       <div class="coach-doc-note">서식8·9·10·통장 사본은 배정 코치의 공통값이며, 수정하면 같은 코치의 모든 기업에 반영됩니다.</div>
@@ -687,19 +775,20 @@ function openCompany(c, docsEditMode) {
     if (docsEditMode) {
       d.querySelectorAll('[data-doc-toggle]').forEach(box => {
         box.onchange = async e => {
-          const key = e.currentTarget.dataset.docToggle;
-          const def = byDocKey(key);
-          e.currentTarget.disabled = true;
-          await saveDocCell(c, def, e.currentTarget.checked ? 'O' : '');
-          openCompany(c, true);
-          requestAnimationFrame(() => DRAWER.querySelector(`[data-doc-toggle="${key}"]`)?.focus());
+          const check = e.currentTarget;
+          const def = byDocKey(check.dataset.docToggle);
+          check.disabled = true;
+          const saved = await saveDocCell(c, def, check.checked ? 'O' : '');
+          check.disabled = false;
+          if (saved) refreshDrawerDocRow(c, def);
+          else check.checked = filled(c.docs[def.k]);   // 저장이 안 되면 표시를 되돌린다
+          check.focus();
         };
       });
       d.querySelectorAll('[data-doc-save]').forEach(btn => {
+        const input = btn.parentElement.querySelector('[data-doc-input]');
         const save = async () => {
-          const key = btn.dataset.docSave;
-          const def = byDocKey(key);
-          const input = btn.parentElement.querySelector('[data-doc-input]');
+          const def = byDocKey(btn.dataset.docSave);
           const entered = input.value.trim();
           if (entered && !monthDayToDate(entered, getBaseYear())) {
             input.classList.add('bad');
@@ -710,19 +799,30 @@ function openCompany(c, docsEditMode) {
           btn.disabled = true;
           input.disabled = true;
           btn.textContent = '저장 중';
-          await saveDocCell(c, def, entered);
-          openCompany(c, true);
-          requestAnimationFrame(() => {
-            const next = DRAWER.querySelector(`[data-doc-input="${key}"]`);
-            if (next) { next.focus(); next.select(); }
-          });
+          const saved = await saveDocCell(c, def, entered);
+          btn.disabled = false;
+          input.disabled = false;
+          btn.textContent = '저장';
+          /*
+           * 저장한 줄만 다시 그린다 — 아래·위 다른 칸에 적어둔 내용은 그대로 남는다.
+           * 실패하면 적은 값을 그대로 두고 붉게 표시해, 고쳐서 다시 누를 수 있게 한다.
+           */
+          if (saved) {
+            refreshDrawerDocRow(c, def);
+            if (def.linkConsult) refreshDrawerConsultLines(c);
+            flashSaveButton(btn);
+          } else {
+            input.classList.add('bad');
+          }
+          input.focus();
+          input.select();
         };
         btn.onclick = save;
-        const input = btn.parentElement.querySelector('[data-doc-input]');
         input.oninput = () => input.classList.remove('bad');
         input.onkeydown = e => {
           if (e.key === 'Enter') { e.preventDefault(); save(); }
-          if (e.key === 'Escape') { e.preventDefault(); openCompany(c, true); }
+          // Esc = 이 칸만 저장된 값으로 되돌리기 (다른 칸은 건드리지 않는다)
+          if (e.key === 'Escape') { e.preventDefault(); input.value = docCellText(c.docs[btn.dataset.docSave]); input.classList.remove('bad'); }
         };
       });
     }
@@ -760,7 +860,7 @@ function openCoach(c, docsEditMode) {
     const raw = c[def.byCoach];
     const has = filled(raw);
     if (!docsEditMode) {
-      return `<div class="chk ${has ? 'ok' : 'no'}"><div class="mk">${has ? '●' : '○'}</div>` +
+      return `<div class="chk ${has ? 'ok' : 'no'}" data-coach-doc-row="${esc(def.k)}"><div class="mk">${has ? '●' : '○'}</div>` +
         `<div class="lb">${esc(def.label)}</div><div class="vl">${has ? esc(cellText(raw)) : '미제출'}</div></div>`;
     }
     const control = def.type === 'mark'
@@ -769,7 +869,7 @@ function openCoach(c, docsEditMode) {
           <input type="text" inputmode="numeric" placeholder="6/22" value="${esc(docCellText(raw))}" data-coach-doc-input="${esc(def.k)}">
           <button class="drawer-doc-save" type="button" data-coach-doc-save="${esc(def.k)}">저장</button>
         </div>`;
-    return `<div class="chk doc-row-edit ${has ? 'ok' : 'no'}"><div class="mk">${has ? '●' : '○'}</div>` +
+    return `<div class="chk doc-row-edit ${has ? 'ok' : 'no'}" data-coach-doc-row="${esc(def.k)}"><div class="mk">${has ? '●' : '○'}</div>` +
       `<div class="lb">${esc(def.label)}<em>코치 공통</em></div>${control}</div>`;
   }).join('');
   const comps = c.companies.length
@@ -806,19 +906,20 @@ function openCoach(c, docsEditMode) {
     if (!docsEditMode) return;
     d.querySelectorAll('[data-coach-doc-toggle]').forEach(box => {
       box.onchange = async e => {
-        const key = e.currentTarget.dataset.coachDocToggle;
-        const def = byDocKey(key);
-        e.currentTarget.disabled = true;
-        await saveCoachDoc(c, def, e.currentTarget.checked ? 'O' : '');
-        openCoach(c, true);
-        requestAnimationFrame(() => DRAWER.querySelector(`[data-coach-doc-toggle="${key}"]`)?.focus());
+        const check = e.currentTarget;
+        const def = byDocKey(check.dataset.coachDocToggle);
+        check.disabled = true;
+        const saved = await saveCoachDoc(c, def, check.checked ? 'O' : '');
+        check.disabled = false;
+        if (saved) refreshCoachDocRow(c, def);
+        else check.checked = filled(c[def.byCoach]);
+        check.focus();
       };
     });
     d.querySelectorAll('[data-coach-doc-save]').forEach(btn => {
+      const input = btn.parentElement.querySelector('[data-coach-doc-input]');
       const save = async () => {
-        const key = btn.dataset.coachDocSave;
-        const def = byDocKey(key);
-        const input = btn.parentElement.querySelector('[data-coach-doc-input]');
+        const def = byDocKey(btn.dataset.coachDocSave);
         const entered = input.value.trim();
         if (entered && !monthDayToDate(entered, getBaseYear())) {
           input.classList.add('bad');
@@ -829,19 +930,20 @@ function openCoach(c, docsEditMode) {
         btn.disabled = true;
         input.disabled = true;
         btn.textContent = '저장 중';
-        await saveCoachDoc(c, def, entered);
-        openCoach(c, true);
-        requestAnimationFrame(() => {
-          const next = DRAWER.querySelector(`[data-coach-doc-input="${key}"]`);
-          if (next) { next.focus(); next.select(); }
-        });
+        const saved = await saveCoachDoc(c, def, entered);
+        btn.disabled = false;
+        input.disabled = false;
+        btn.textContent = '저장';
+        if (saved) { refreshCoachDocRow(c, def); flashSaveButton(btn); }
+        else input.classList.add('bad');
+        input.focus();
+        input.select();
       };
       btn.onclick = save;
-      const input = btn.parentElement.querySelector('[data-coach-doc-input]');
       input.oninput = () => input.classList.remove('bad');
       input.onkeydown = e => {
         if (e.key === 'Enter') { e.preventDefault(); save(); }
-        if (e.key === 'Escape') { e.preventDefault(); openCoach(c, true); }
+        if (e.key === 'Escape') { e.preventDefault(); input.value = docCellText(c[byDocKey(btn.dataset.coachDocSave).byCoach]); input.classList.remove('bad'); }
       };
     });
   });

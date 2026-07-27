@@ -12,7 +12,7 @@
   파일을 고친 뒤에는 이 숫자를 올려야 사용자 화면에도 새 내용이 반영됩니다.
   (올리지 않으면 브라우저가 예전 파일을 계속 씁니다)
 -->
-<link rel="stylesheet" href="assets/styles.css?v=20260726-ux10">
+<link rel="stylesheet" href="assets/styles.css?v=20260726-ux17">
 </head>
 <body>
 
@@ -293,8 +293,8 @@
                     <input id="newConsult1Date" type="text" placeholder="예: 6/22" inputmode="numeric" autocomplete="off">
                   </div>
                   <div class="company-field">
-                    <label for="newConsult1Time">시간</label>
-                    <input id="newConsult1Time" type="time">
+                    <label for="newConsult1Time">시간 <span class="auto">24시간</span></label>
+                    <input id="newConsult1Time" type="text" list="consultTimeOptions" placeholder="예: 10:00" inputmode="numeric" autocomplete="off" maxlength="8">
                   </div>
                   <div class="company-field visit-owner">
                     <label for="newConsult1Owner">동행 담당자</label>
@@ -317,8 +317,8 @@
                     <input id="newConsult2Date" type="text" placeholder="예: 7/6" inputmode="numeric" autocomplete="off">
                   </div>
                   <div class="company-field">
-                    <label for="newConsult2Time">시간</label>
-                    <input id="newConsult2Time" type="time">
+                    <label for="newConsult2Time">시간 <span class="auto">24시간</span></label>
+                    <input id="newConsult2Time" type="text" list="consultTimeOptions" placeholder="예: 15:00" inputmode="numeric" autocomplete="off" maxlength="8">
                   </div>
                   <div class="company-field visit-owner">
                     <label for="newConsult2Owner">동행 담당자</label>
@@ -328,8 +328,10 @@
                 </div>
               </div>
             </div>
-            <p class="consult-schedule-note">동행을 체크하면 시트의 ‘방문(최근일자)’에도 가장 최근 일정과 담당자가 자동 반영됩니다. 내부 종료기한은 1차 컨설팅일 기준 28일로 계산됩니다.</p>
+            <p class="consult-schedule-note">컨설팅일과 서류의 ‘컨설팅 수행일지’는 서로 연결되어 있습니다. 한쪽을 고치면 같은 차수의 다른 쪽도 같은 날로 바뀝니다. 날짜를 지우는 것은 따라가지 않습니다. 동행을 체크하면 시트의 ‘방문(최근일자)’에도 가장 최근 일정과 담당자가 자동 반영됩니다. 내부 종료기한은 1차 컨설팅일 기준 28일로 계산됩니다.</p>
             <div class="consult-legacy-visit" id="legacyVisitNote"></div>
+            <!-- 시간 입력 칸에서 고를 수 있는 30분 단위 목록 — js/company-form.js가 채웁니다 -->
+            <datalist id="consultTimeOptions"></datalist>
           </section>
         </div>
         <div class="company-step-panel" id="companyStepDocs" role="tabpanel" aria-labelledby="companyTabDocs" data-company-step-panel="docs" hidden>
@@ -362,16 +364,16 @@
 </div></div>
 <input type="file" id="filePick" accept=".xlsx,.csv" style="display:none">
 
-<script src="js/config.js?v=20260726-ux10"></script>
-<script src="js/data.js?v=20260726-ux10"></script>
-<script src="js/core.js?v=20260726-ux10"></script>
-<script src="js/searchable-select.js?v=20260726-ux10"></script>
-<script src="js/views.js?v=20260726-ux10"></script>
-<script src="js/documents.js?v=20260726-ux10"></script>
-<script src="js/mail.js?v=20260726-ux10"></script>
-<script src="js/sheet-api.js?v=20260726-ux10"></script>
-<script src="js/agency-branch.js?v=20260726-ux10"></script>
-<script src="js/company-form.js?v=20260726-ux10"></script>
-<script src="js/app.js?v=20260726-ux10"></script>
+<script src="js/config.js?v=20260726-ux17"></script>
+<script src="js/data.js?v=20260726-ux17"></script>
+<script src="js/core.js?v=20260726-ux17"></script>
+<script src="js/searchable-select.js?v=20260726-ux17"></script>
+<script src="js/views.js?v=20260726-ux17"></script>
+<script src="js/documents.js?v=20260726-ux17"></script>
+<script src="js/mail.js?v=20260726-ux17"></script>
+<script src="js/sheet-api.js?v=20260726-ux17"></script>
+<script src="js/agency-branch.js?v=20260726-ux17"></script>
+<script src="js/company-form.js?v=20260726-ux17"></script>
+<script src="js/app.js?v=20260726-ux17"></script>
 </body>
 </html>

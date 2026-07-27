@@ -197,7 +197,7 @@ function fillConsultationFields(company) {
     const fallback = i === 0 && company ? company.start : null;
     const rawDate = item.date || fallback;
     $(`#newConsult${index}Date`).value = rawDate ? mdWithYear(rawDate, year) : (item.dateRaw || '');
-    $(`#newConsult${index}Time`).value = item.time || '';
+    $(`#newConsult${index}Time`).value = to24Time(item.time);
     $(`#newConsult${index}Visit`).checked = !!item.visit;
     $(`#newConsult${index}Owner`).value = item.owner || '';
     syncVisitControls(index, false);
@@ -213,15 +213,34 @@ function fillConsultationFields(company) {
   }
   companyScheduleEdited = false;
 }
+/** 시간 칸에서 고를 수 있는 30분 단위 목록 (08:00 ~ 20:00) */
+function buildConsultTimeOptions() {
+  const list = $('#consultTimeOptions');
+  if (!list) return;
+  let html = '';
+  for (let minutes = 8 * 60; minutes <= 20 * 60; minutes += 30) {
+    const text = String(Math.floor(minutes / 60)).padStart(2, '0') + ':' + String(minutes % 60).padStart(2, '0');
+    html += `<option value="${text}">`;
+  }
+  list.innerHTML = html;
+}
+/** 칸에서 벗어나면 10 · 10시 · 오후 3 처럼 적어도 10:00 · 15:00 모양으로 맞춰준다 */
+function normalizeConsultTimeField(index) {
+  const box = $(`#newConsult${index}Time`);
+  const fixed = to24Time(box.value);
+  if (fixed) box.value = fixed;
+}
 function consultationFormValues(year) {
   return [1, 2].map(index => {
     const date = monthDayToDate($(`#newConsult${index}Date`).value, year);
     const visit = $(`#newConsult${index}Visit`).checked;
+    const timeText = $(`#newConsult${index}Time`).value.trim();
     return {
       index,
       date,
       dateText: $(`#newConsult${index}Date`).value.trim(),
-      time: $(`#newConsult${index}Time`).value,
+      timeText,
+      time: to24Time(timeText),
       visit,
       owner: visit ? $(`#newConsult${index}Owner`).value : '',
     };
@@ -230,6 +249,55 @@ function consultationFormValues(year) {
 const docFieldId = def => 'newDoc_' + def.k;
 const docInput = k => $('#' + docFieldId(byDocKey(k)));
 
+/* 컨설팅 일정 ↔ 서류 «컨설팅 수행일지» — 양쪽 방향 모두 연결
+ *  · 컨설팅일을 고치면 같은 차수의 수행일지가 같은 날로 바뀐다
+ *  · 수행일지를 고치면 같은 차수의 컨설팅일이 같은 날로 바뀐다
+ *  · 어느 쪽이든 «지우는» 것은 따라가지 않는다 (지운 김에 일정까지 날아가지 않게)
+ *  · 창을 열 때는 한쪽이 비어 있을 때만 채운다. 서로 다른 날짜가 저장돼 있으면 그대로 둔다 */
+const CONSULT_LOG_DEFS = DOC_DEFS.filter(d => d.linkConsult);
+const consultLogInput = index => {
+  const def = CONSULT_LOG_DEFS.find(d => d.linkConsult === index);
+  return def ? docInput(def.k) : null;
+};
+function setLinkedField(box, text) {
+  if (!box || box.value.trim() === text) return;
+  box.value = text;
+  box.classList.remove('bad');
+  paintCompanyFieldValidation(box, '');
+}
+/** 컨설팅일 → 수행일지 */
+function syncConsultationLog(index) {
+  const text = $(`#newConsult${index}Date`).value.trim();
+  if (!text) return;
+  setLinkedField(consultLogInput(index), text);
+}
+/** 수행일지 → 컨설팅일 */
+function syncLogToConsultation(index) {
+  const box = consultLogInput(index);
+  if (!box) return;
+  const text = box.value.trim();
+  if (!text) return;
+  const dateBox = $(`#newConsult${index}Date`);
+  if (dateBox.value.trim() === text) return;
+  setLinkedField(dateBox, text);
+  companyScheduleEdited = true;              // 일정 열도 시트에 다시 써야 한다
+}
+/** 창을 열 때 한 번 — 비어 있는 쪽만 채우고, 서로 다른 값이 저장돼 있으면 손대지 않는다 */
+function initConsultationLogLinks() {
+  CONSULT_LOG_DEFS.forEach(def => {
+    const index = def.linkConsult;
+    const box = consultLogInput(index);
+    if (!box) return;
+    const dateText = $(`#newConsult${index}Date`).value.trim();
+    const logText = box.value.trim();
+    if (dateText && !logText) setLinkedField(box, dateText);
+    else if (logText && !dateText) {
+      setLinkedField($(`#newConsult${index}Date`), logText);
+      companyScheduleEdited = true;          // 비어 있던 일정을 채웠으니 시트에도 써야 한다
+    }
+  });
+}
+
 /** 서류 탭 15개 열을 단계별 입력 칸으로 — DOC_DEFS가 유일한 기준이라 열이 바뀌면 폼도 같이 따라간다 */
 function buildCompanyDocFields() {
   $('#companyDocFields').innerHTML = STAGES.map(stage => {
@@ -237,6 +305,10 @@ function buildCompanyDocFields() {
     return `<div class="doc-stage"><h4>${esc(stage)}</h4><div class="company-fields">${fields}</div></div>`;
   }).join('');
   docInput('teamStart').oninput = syncTeamEnd;   // 종료일은 시작일에 붙어 따라온다
+  CONSULT_LOG_DEFS.forEach(def => {              // 수행일지를 고치면 컨설팅일도 같이 따라간다
+    const box = docInput(def.k);
+    if (box) box.oninput = () => syncLogToConsultation(def.linkConsult);
+  });
 }
 function docFieldHtml(d) {
   const id = docFieldId(d);
@@ -250,6 +322,7 @@ function docFieldHtml(d) {
   const note = d.byCoach ? '코치 공통 · 서류현황에서 수정'
     : d.type === 'auto' ? '시작일 +28일 자동'
     : d.type === 'range' ? '월/일 ~ 12/31'
+    : d.linkConsult ? `${d.linkConsult}차 컨설팅일과 연동`
     : '월/일';
   const box = `<input type="text" id="${id}" inputmode="numeric" autocomplete="off"
     placeholder="${locked ? '자동 입력' : '예: 6/22'}"${locked ? ' readonly tabindex="-1"' : ''}>`;
@@ -339,6 +412,7 @@ function openCompanyDialog() {
   COMPANY_FORM.querySelectorAll('.bad').forEach(box => box.classList.remove('bad'));
   updateCoachContact({ useMaster: true });
   syncTeamEnd();
+  initConsultationLogLinks();
   setCompanyFormStep('basic');
   updateCompanyFormProgress();
   resetAgencyBranchAutomation(null);
@@ -385,6 +459,7 @@ function openCompanyEditDialog(company) {
   $('#newCoachPhone').value = contactDiffers ? savedPhone : masterPhone;
   updateCoachContact({ useMaster: !contactDiffers });
   syncTeamEnd();
+  initConsultationLogLinks();
   $('#companyDocs').open = true;
   setCompanyFormStep('basic');
   updateCompanyFormProgress();
@@ -397,6 +472,79 @@ function openCompanyEditDialog(company) {
   rememberCompanyForm();
   requestAnimationFrame(() => $('#newStatus').focus());
 }
+/**
+ * 서류 현황·상세창에서 «컨설팅 수행일지»를 고쳤을 때, 같은 차수의 컨설팅일도 시트에 같이 반영한다.
+ * 지운 경우(dateIso가 빈 값)는 일정을 건드리지 않는다 — 서류만 지웠는데 일정까지 날아가지 않게.
+ */
+async function syncConsultDateFromDoc(company, index, dateIso) {
+  if (!company || !dateIso) return false;
+  const items = company.consultations || [{}, {}];
+  const item = items[index - 1] || {};
+  const before = item.date ? iso(item.date) : '';
+  if (before === dateIso) return false;                 // 이미 같은 날이면 보낼 필요가 없다
+  const dates = [
+    items[0] && items[0].date ? iso(items[0].date) : '',
+    items[1] && items[1].date ? iso(items[1].date) : '',
+  ];
+  dates[index - 1] = dateIso;
+  // 1차를 고치면 컨설팅 시작·내부 종료기한(+28일)도 같이 옮기고, 2차만 고칠 때는 기존 값을 지킨다
+  const firstDate = index === 1 ? isoToDate(dateIso) : (isoToDate(dates[0]) || company.start || null);
+  const endDate = index === 1
+    ? (firstDate ? iso(addDays(firstDate, 28)) : '')
+    : (company.end ? iso(company.end) : '');
+  const workplace = company.workplace || {};
+  const payload = {
+    originalCompanyName: company.name,
+    companyName: company.name,
+    status: company.status || '검토요청',
+    owner: company.owner || '',
+    contactName: company.contact.name || '',
+    contactTitle: company.contact.title || '',
+    contactPhone: company.contact.phone || '',
+    contactEmail: company.contact.email || '',
+    memo: company.memo || '',
+    employeeCount: workplace.employeeCount || '',
+    workplaceNumber: workplace.managementNumber || '',
+    companyAddress: workplace.address || '',
+    agencyBranch: workplace.agencyBranch || '',
+    hrd4uId: workplace.hrd4uId || '',
+    startDate: firstDate ? iso(firstDate) : '',
+    endDate,
+    coachName: company.coachName || '',
+    coachEmail: company.coachEmail || '',
+    coachPhone: company.coachPhone || '',
+    scheduleChanged: true,
+    consult1Date: dates[0],
+    consult1Time: (items[0] && items[0].time) || '',
+    consult1Visit: items[0] && items[0].visit ? 'O' : '',
+    consult1Owner: (items[0] && items[0].owner) || '',
+    consult2Date: dates[1],
+    consult2Time: (items[1] && items[1].time) || '',
+    consult2Visit: items[1] && items[1].visit ? 'O' : '',
+    consult2Owner: (items[1] && items[1].owner) || '',
+    _audit: {
+      type: 'EDIT',
+      target: company.name,
+      detail: `${index}차 컨설팅일 ${before ? md(isoToDate(before)) : '미정'} → ${md(isoToDate(dateIso))} (수행일지 연동)`,
+      tone: 'info',
+      before: { [`consult${index}Date`]: before },
+      after: { [`consult${index}Date`]: dateIso }
+    }
+  };
+  await requestSheetWrite(writeEndpoint(), 'updateCompany', payload);
+  // 화면에 들고 있는 값도 같이 맞춘다 — 다음 동기화까지 어긋나 보이지 않게
+  items[index - 1] = Object.assign({}, item, { dateRaw: dateIso, date: isoToDate(dateIso) });
+  company.consultations = items;
+  if (index === 1) {
+    company.startRaw = payload.startDate;
+    company.start = firstDate;
+    company.endRaw = payload.endDate;
+    company.end = isoToDate(payload.endDate);
+    if (typeof updateCompanyDeadline === 'function') updateCompanyDeadline(company);
+  }
+  return true;
+}
+
 /**
  * 잘못 등록한 기업을 «신청취소»로 돌린다.
  * 행을 지우지 않으므로 기록은 남고, 진행 중 집계·마감 관리에서는 빠진다.
@@ -705,6 +853,12 @@ async function saveCompany() {
       setCompanyState(`${item.index}차 컨설팅일 — 6/22 처럼 월/일로 적어주세요.`, 'bad');
       setCompanyFormStep('schedule');
       markBadField(dateBox);
+      return;
+    }
+    if (item.timeText && !item.time) {
+      setCompanyState(`${item.index}차 컨설팅 시간 — 10:00 처럼 24시간으로 적어주세요.`, 'bad');
+      setCompanyFormStep('schedule');
+      markBadField($(`#newConsult${item.index}Time`));
       return;
     }
     if (item.time && !item.date) {

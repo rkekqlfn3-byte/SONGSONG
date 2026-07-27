@@ -85,6 +85,7 @@
 
   // 기업 추가
   buildCompanyDocFields();
+  buildConsultTimeOptions();
   $('#btnAddCompany').onclick = openCompanyDialog;
   // 인자를 넘기지 않아야 «입력 중이면 확인» 이 걸린다 (클릭 이벤트를 그대로 넘기면 안 된다)
   $('#companyClose').onclick = () => closeCompanyDialog();
@@ -114,8 +115,13 @@
     if ($('#coachContactOverride').checked) $('#newCoachEmail').focus();
   };
   [1, 2].forEach(index => {
-    $(`#newConsult${index}Date`).oninput = () => { companyScheduleEdited = true; };
+    $(`#newConsult${index}Date`).oninput = () => {
+      companyScheduleEdited = true;
+      syncConsultationLog(index);           // 수행일지 날짜도 같이 따라간다
+    };
     $(`#newConsult${index}Time`).oninput = () => { companyScheduleEdited = true; };
+    $(`#newConsult${index}Time`).onblur = () => normalizeConsultTimeField(index);
+    $(`#newConsult${index}Time`).onchange = () => normalizeConsultTimeField(index);
     $(`#newConsult${index}Visit`).onchange = () => syncVisitControls(index, true);
     $(`#newConsult${index}Owner`).onchange = () => { companyScheduleEdited = true; };
   });
