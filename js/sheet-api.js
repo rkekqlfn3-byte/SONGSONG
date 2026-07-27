@@ -152,6 +152,20 @@ function getBaseYear() {
 function setBaseYear(year) { localStorage.setItem(BASE_YEAR_KEY, String(year)); }
 /** 저장용 주소 — 설정에서 바꾸지 않았으면 배포된 기본 주소를 쓴다 */
 const writeEndpoint = () => localStorage.getItem(WRITE_ENDPOINT_KEY) || DEFAULT_WRITE_URL;
+
+/*
+ * 저장용 주소를 새로 발급하면, 예전 주소를 이 브라우저에 저장해 둔 사람은
+ * 계속 옛 주소로 요청해 «저장 실패»만 보게 된다.
+ * 그래서 저장해 둔 주소가 안 되고 기본 주소가 따로 있으면, 한 번 기본 주소로 다시 시도하고
+ * 성공하면 저장값을 지워 다음부터는 기본 주소를 쓰게 한다.
+ */
+function staleWriteEndpoint() {
+  const saved = localStorage.getItem(WRITE_ENDPOINT_KEY);
+  return saved && saved !== DEFAULT_WRITE_URL ? saved : '';
+}
+function dropStaleWriteEndpoint() {
+  try { localStorage.removeItem(WRITE_ENDPOINT_KEY); } catch {}
+}
 /** 읽어오는 탭. headers=0으로 요청하므로 배열 인덱스 = 시트 행 번호 - 1 이 된다 */
 const GVIZ_SHEETS = [TAB_DOCS, TAB_SOURCE, TAB_COACH, TAB_MAIL];
 
@@ -519,7 +533,26 @@ function writeAuditMeta(action, payload) {
   return null;
 }
 
-function requestSheetWrite(endpoint, action, payload) {
+/**
+ * 저장 요청 한 번.
+ * 저장해 둔 옛 주소로 실패하면 기본 주소로 «한 번만» 다시 시도한다.
+ * (주소를 새로 발급했을 때 팀원 브라우저가 스스로 따라오게 하려는 것)
+ */
+async function requestSheetWrite(endpoint, action, payload) {
+  const stale = staleWriteEndpoint();
+  try {
+    return await requestSheetWriteOnce(endpoint, action, payload);
+  } catch (error) {
+    const usedStale = stale && String(endpoint || '').indexOf(stale) === 0;
+    if (!usedStale) throw error;
+    const retried = await requestSheetWriteOnce(DEFAULT_WRITE_URL, action, payload);
+    dropStaleWriteEndpoint();          // 기본 주소가 되니 저장해 둔 옛 주소는 버린다
+    toast('저장 주소가 바뀌어 새 주소로 연결했습니다.');
+    return retried;
+  }
+}
+
+function requestSheetWriteOnce(endpoint, action, payload) {
   const clean = normalizeWriteEndpoint(endpoint);
   const callback = `__sheetWrite_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const requestId = makeRequestId(action);
