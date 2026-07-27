@@ -702,7 +702,7 @@ function clearActivityLogs() {
 }
 
 function activityTypeGroup(type) {
-  if (['ADD', 'EDIT', 'CANCEL', 'RESTORE', 'EXTEND', 'addCompany', 'updateCompany', 'updateExtension'].includes(type)) return 'company';
+  if (['ADD', 'EDIT', 'MEMO', 'CANCEL', 'RESTORE', 'EXTEND', 'addCompany', 'updateCompany', 'updateMemo', 'updateExtension'].includes(type)) return 'company';
   if (['DOC', 'COACH_DOC', 'updateDocs', 'updateCoachDocs'].includes(type)) return 'document';
   if (['SYNC', 'SETTING'].includes(type)) return 'sync';
   if (['SHEET_EDIT', 'SHEET_CHANGE'].includes(type)) return 'sheet';
@@ -754,11 +754,11 @@ function renderActivityLogs() {
   container.innerHTML = logs.map(log => {
     const toneClass = log.tone ? ` is-${log.tone}` : '';
     const typeLabels = {
-      SYNC: '동기화', ADD: '기업 추가', EDIT: '정보 수정',
+      SYNC: '동기화', ADD: '기업 추가', EDIT: '정보 수정', MEMO: '메모 수정',
       CANCEL: '신청취소', RESTORE: '취소 복원', DOC: '서류 변경',
       COACH_DOC: '코치 서류', EXTEND: '기한 연장', SETTING: '설정 변경',
       SHEET_EDIT: '셀 직접 수정', SHEET_CHANGE: '시트 구조 변경',
-      addCompany: '기업 추가', updateCompany: '정보 수정', updateExtension: '기한 연장',
+      addCompany: '기업 추가', updateCompany: '정보 수정', updateMemo: '메모 수정', updateExtension: '기한 연장',
       updateDocs: '서류 변경', updateCoachDocs: '코치 서류'
     };
     const badgeType = typeLabels[log.type] || log.type || '기타';

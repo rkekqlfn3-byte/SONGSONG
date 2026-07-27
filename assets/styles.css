@@ -1367,12 +1367,29 @@ tbody tr.sel td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
 .memo-text{margin:0;font-size:12.5px;line-height:1.55;color:var(--ink-1);white-space:pre-wrap;word-break:break-word}
 /* 기업 목록의 메모 표시 — 좁으니 말줄임하고 전체는 마우스 올려서 */
 .row-memo{
-  display:inline-block;flex:0 1 150px;min-width:0;max-width:150px;margin-left:6px;vertical-align:middle;
+  display:inline-block;flex:0 1 150px;min-width:0;max-width:150px;margin-left:6px;padding:2px 3px;vertical-align:middle;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  color:var(--ink-3);font-size:11px;
+  border:0;border-radius:5px;background:transparent;color:var(--ink-3);font-size:11px;text-align:left;cursor:pointer;
 }
 .row-memo::before{content:"✎ ";color:var(--warning)}
+.row-memo:hover{background:color-mix(in srgb,var(--warning) 11%,transparent);color:var(--ink-1)}
+.row-memo.empty{color:var(--ink-3)}
 .company-name-wrap{min-width:0}
+.memo-edit-button{
+  border:1px solid color-mix(in srgb,var(--warning) 34%,var(--border));border-radius:7px;padding:3px 8px;
+  background:var(--surface);color:var(--ink-2);font-size:10.5px;font-weight:700;cursor:pointer;
+}
+.memo-edit-button:hover{border-color:var(--warning);color:var(--ink-1)}
+.company-memo-editor{display:grid;gap:7px;width:100%;margin-top:8px;white-space:normal}
+.company-memo-editor textarea{
+  width:100%;min-height:72px;resize:vertical;padding:9px 10px;font:inherit;font-size:12px;line-height:1.5;
+}
+.company-memo-editor-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px}
+.company-memo-editor-state{flex:1;color:var(--ink-3);font-size:10.5px;line-height:1.35}
+.company-memo-editor-state.bad{color:var(--critical)}
+.company-memo-editor-actions .btn{min-height:30px;padding:5px 10px;font-size:11px}
+.company-name>.company-memo-editor{min-width:280px}
+.memo-sect>.company-memo-editor{margin-top:0}
 #companyForm textarea{
   width:100%;min-height:0;resize:vertical;
   font:inherit;font-size:12.5px;line-height:1.5;

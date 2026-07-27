@@ -382,6 +382,116 @@ const COMP_SORT = {
   docs: c => c.docCount,
   status: c => STATUS.findIndex(x => x.k === c.status),
 };
+
+/**
+ * 기업 목록과 상세 패널에서 공통으로 쓰는 메모 전용 편집기.
+ * 메모 한 칸만 저장하므로 시트에서 동시에 고친 다른 기업 정보는 덮어쓰지 않는다.
+ */
+function openCompanyMemoEditor(company, host, trigger, options) {
+  const opts = options || {};
+  document.querySelectorAll('.company-memo-editor').forEach(editor => {
+    if (typeof editor.cancelEdit === 'function') editor.cancelEdit(false);
+    else editor.remove();
+  });
+
+  const display = opts.display || null;
+  const form = el('form', 'company-memo-editor');
+  const box = el('textarea');
+  const actions = el('div', 'company-memo-editor-actions');
+  const stateText = el('span', 'company-memo-editor-state');
+  const cancel = el('button', 'btn', '취소');
+  const save = el('button', 'btn primary', '저장');
+  box.maxLength = 500;
+  box.rows = 3;
+  box.value = company.memo || '';
+  box.placeholder = '기업 메모를 입력하세요';
+  box.setAttribute('aria-label', `${company.name} 메모`);
+  stateText.setAttribute('aria-live', 'polite');
+  cancel.type = 'button';
+  save.type = 'submit';
+  actions.append(stateText, cancel, save);
+  form.append(box, actions);
+
+  const close = restoreFocus => {
+    form.remove();
+    trigger.hidden = false;
+    if (display) display.hidden = false;
+    if (restoreFocus !== false && document.contains(trigger)) trigger.focus();
+  };
+  form.cancelEdit = close;
+  trigger.hidden = true;
+  if (display) display.hidden = true;
+  host.appendChild(form);
+
+  cancel.onclick = () => close(true);
+  form.onclick = event => event.stopPropagation();
+  box.onkeydown = event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      close(true);
+    } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      form.requestSubmit();
+    }
+  };
+  box.oninput = () => {
+    box.classList.remove('bad');
+    stateText.classList.remove('bad');
+    stateText.textContent = '';
+  };
+  form.onsubmit = async event => {
+    event.preventDefault();
+    const memo = box.value.trim();
+    const before = company.memo || '';
+    if (memo === before) {
+      close(true);
+      toast('변경된 메모가 없습니다.');
+      return;
+    }
+    box.disabled = true;
+    cancel.disabled = true;
+    save.disabled = true;
+    save.textContent = '저장 중…';
+    stateText.textContent = 'Google Sheet에 반영 중';
+    try {
+      await requestSheetWrite(writeEndpoint(), 'updateMemo', {
+        companyName: company.name,
+        memo,
+        _audit: {
+          type: 'MEMO',
+          target: company.name,
+          detail: memo ? '기업 메모 수정' : '기업 메모 지움',
+          tone: 'info',
+          before: { memo: before },
+          after: { memo }
+        }
+      });
+      company.memo = memo;
+      close(false);
+      if (typeof opts.onSaved === 'function') opts.onSaved(memo);
+      else render();
+      toast(`${company.name} 메모 저장 완료`);
+      syncFromSheet(localStorage.getItem(SHEET_ENDPOINT_KEY) || DEFAULT_SHEET_URL, {
+        silent: true, reason: 'after-write'
+      }).catch(error => console.error(error));
+    } catch (error) {
+      console.error(error);
+      box.disabled = false;
+      cancel.disabled = false;
+      save.disabled = false;
+      save.textContent = '다시 저장';
+      stateText.textContent = error.message || '저장하지 못했습니다.';
+      stateText.classList.add('bad');
+      box.classList.add('bad');
+      box.focus();
+    }
+  };
+  requestAnimationFrame(() => {
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);
+  });
+}
+
 function viewCompanies() {
   const s = state.comp;
   const all = state.M.companies;
@@ -430,7 +540,8 @@ function viewCompanies() {
     { k: 'status', h: '진행현황', cell: c => badge(c.status) },
     { k: 'name', h: '기업명', cls: 'company-name', cell: c =>
       `<div class="company-name-wrap"><span class="strong">${esc(c.name)}</span>` +
-      (c.memo ? `<span class="row-memo" data-tip="${esc(c.memo)}">${esc(c.memo)}</span>` : '') +
+      `<button type="button" class="row-memo${c.memo ? '' : ' empty'}" data-company-memo="${esc(c.name)}"` +
+      ` data-tip="${esc(c.memo || '메모 추가')}">${esc(c.memo || '메모 추가')}</button>` +
       `<button type="button" class="row-edit-company" data-company-edit="${esc(c.name)}" aria-label="${esc(c.name)} 정보 수정">수정</button>` +
       (c.status === '신청취소' ? '' :
         `<button type="button" class="row-edit-company row-cancel-company" data-company-cancel="${esc(c.name)}" aria-label="${esc(c.name)} 신청취소 처리">취소</button>`) +
@@ -471,6 +582,13 @@ function viewCompanies() {
         e.stopPropagation();
         const company = state.M.companies.find(c => c.name === btn.dataset.companyEdit);
         if (company) openCompanyEditDialog(company);
+      };
+    });
+    built.querySelectorAll('[data-company-memo]').forEach(btn => {
+      btn.onclick = e => {
+        e.stopPropagation();
+        const company = state.M.companies.find(c => c.name === btn.dataset.companyMemo);
+        if (company) openCompanyMemoEditor(company, btn.closest('td'), btn);
       };
     });
     built.querySelectorAll('[data-company-cancel]').forEach(btn => {

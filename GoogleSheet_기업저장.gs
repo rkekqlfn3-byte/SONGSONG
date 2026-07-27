@@ -25,9 +25,10 @@
  *   ?action=updateDocs&payload=...     이미 있는 기업의 서류 날짜만 수정
  *   ?action=updateCoachDocs&payload=... 코치 공통 서식8·9·10·통장사본 수정
  *   ?action=updateExtension&payload=... 기업 종료기한 2주 연장 여부 수정
+ *   ?action=updateMemo&payload=...      기업 메모만 수정
  */
 
-const VERSION = '2026-07-27-perf1';
+const VERSION = '2026-07-27-memo1';
 
 const SPREADSHEET_ID = '1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q';
 /*
@@ -113,7 +114,14 @@ const COMPANY_EXTENSION_COLUMN = {
   aliases: ['2주 연장'],
   type: 'mark'
 };
-const COMPANY_SOURCE_COLUMNS = COMPANY_INFO_COLUMNS.concat([COMPANY_EXTENSION_COLUMN]);
+/** 메모는 시트와 웹이 함께 쓰는 단일 원본 열이다. 없으면 원본 탭 끝에 만든다. */
+const COMPANY_MEMO_COLUMN = {
+  key: 'memo',
+  header: '메모',
+  aliases: ['메모'],
+  type: 'text'
+};
+const COMPANY_SOURCE_COLUMNS = COMPANY_INFO_COLUMNS.concat([COMPANY_EXTENSION_COLUMN, COMPANY_MEMO_COLUMN]);
 
 /** 기업 원본 탭에 추가되는 1·2차 컨설팅 일정 열. 기존 열은 건드리지 않고 마지막 열 뒤에 붙인다. */
 const CONSULTATION_COLUMNS = [
@@ -206,6 +214,9 @@ function doGet(e) {
     } else if (action === 'updateExtension') {
       const updated = updateExtension_(payload);
       result = { company: updated.company, row: updated.row, extended: updated.extended };
+    } else if (action === 'updateMemo') {
+      const updated = updateMemo_(payload);
+      result = { company: updated.company, row: updated.row, memo: updated.memo };
     } else if (action === 'updateCompany') {
       const updated = updateCompany_(payload);
       result = { company: updated.company, row: updated.row, docRow: updated.docRow };
@@ -382,6 +393,10 @@ function ensureExtensionColumn_(sheet) {
   ensureSourceExtraColumns_(sheet, [COMPANY_EXTENSION_COLUMN], '종료기한 관리');
 }
 
+function ensureMemoColumn_(sheet) {
+  ensureSourceExtraColumns_(sheet, [COMPANY_MEMO_COLUMN], '기업 메모');
+}
+
 function ensureConsultationColumns_(sheet) {
   ensureSourceExtraColumns_(sheet, CONSULTATION_COLUMNS, '1·2차 컨설팅 일정');
 }
@@ -490,6 +505,7 @@ function addCompany_(data) {
     const source = sourceSheet_(book);
     const scheduleChanged = data.scheduleChanged === true || String(data.scheduleChanged).toLowerCase() === 'true';
     ensureCompanyInfoColumns_(source);
+    ensureMemoColumn_(source);
     if (scheduleChanged) ensureConsultationColumns_(source);
     const columns = sourceColumns_(source);
     const schedule = scheduleChanged ? consultationValues_(data) : null;
@@ -551,6 +567,7 @@ function updateCompany_(data) {
     const hasScheduleFlag = Object.prototype.hasOwnProperty.call(data, 'scheduleChanged');
     const scheduleChanged = data.scheduleChanged === true || String(data.scheduleChanged).toLowerCase() === 'true';
     ensureCompanyInfoColumns_(source);
+    ensureMemoColumn_(source);
     if (scheduleChanged) ensureConsultationColumns_(source);
     const columns = sourceColumns_(source);
     const schedule = scheduleChanged ? consultationValues_(data) : null;
@@ -614,6 +631,41 @@ function updateCompany_(data) {
       written = writeDocumentRow_(book, originalName, data.docs || {});
     }
     return { company: companyName, row: targetRow, docRow: written ? written.row : null };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** 기존 기업의 메모 한 칸만 수정한다. 다른 기업 정보는 읽거나 덮어쓰지 않는다. */
+function updateMemo_(data) {
+  const companyName = cleanText_(data.companyName);
+  const memo = cleanText_(data.memo);
+  if (!companyName) throw new Error('기업명이 필요합니다.');
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const book = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const source = sourceSheet_(book);
+    ensureMemoColumn_(source);
+    const columns = sourceColumns_(source);
+    const lastRow = source.getLastRow();
+    if (lastRow < SOURCE_FIRST_ROW) throw new Error('기업 데이터를 찾지 못했습니다.');
+
+    const names = source
+      .getRange(SOURCE_FIRST_ROW, columns.companyName, lastRow - SOURCE_FIRST_ROW + 1, 1)
+      .getDisplayValues();
+    let targetRow = 0;
+    for (let i = 0; i < names.length; i++) {
+      if (String(names[i][0] || '').trim() === companyName) {
+        targetRow = SOURCE_FIRST_ROW + i;
+        break;
+      }
+    }
+    if (!targetRow) throw new Error('«' + companyName + '» 기업 행을 찾지 못했습니다.');
+
+    source.getRange(targetRow, columns.memo).setValue(memo);
+    return { company: companyName, row: targetRow, memo: memo };
   } finally {
     lock.releaseLock();
   }

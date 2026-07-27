@@ -42,7 +42,7 @@ function failedWriteLabel(action, payload) {
   const target = payload && (payload.companyName || payload.originalCompanyName || payload.coachName);
   const actionNames = {
     addCompany: '기업 추가', updateCompany: '기업 수정', updateDocs: '서류 저장',
-    updateCoachDocs: '코치 서류 저장', updateExtension: '2주 연장 저장'
+    updateCoachDocs: '코치 서류 저장', updateExtension: '2주 연장 저장', updateMemo: '메모 저장'
   };
   return `${actionNames[action] || '저장'}${target ? ` · ${target}` : ''}`;
 }
@@ -331,10 +331,11 @@ let syncInFlightPromise = null;
 function syncBlockedByEditing() {
   const documentCellOpen = typeof docEditing !== 'undefined' && !!docEditing;
   const companyFormOpen = typeof COMPANY_DIALOG !== 'undefined' && COMPANY_DIALOG.classList.contains('open');
+  const memoEditOpen = !!document.querySelector('.company-memo-editor');
   const drawerEditOpen = typeof DRAWER !== 'undefined' &&
     DRAWER.classList.contains('open') &&
     !!DRAWER.querySelector('.doc-row-edit');
-  return documentCellOpen || companyFormOpen || drawerEditOpen;
+  return documentCellOpen || companyFormOpen || memoEditOpen || drawerEditOpen;
 }
 
 async function syncFromSheet(endpoint, options) {
@@ -422,6 +423,9 @@ function writeAuditMeta(action, payload) {
   }
   if (action === 'updateExtension') {
     return { type: 'EXTEND', target: sent.companyName, detail: '종료 기한 2주 연장 변경', tone: 'warn' };
+  }
+  if (action === 'updateMemo') {
+    return { type: 'MEMO', target: sent.companyName, detail: '기업 메모 수정', tone: 'info' };
   }
   return null;
 }

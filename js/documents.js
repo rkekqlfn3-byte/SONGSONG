@@ -972,7 +972,10 @@ function openCompany(c, docsEditMode) {
     : '';
 
   openDrawer(esc(c.name), `${badge(c.status)} <span class="dim">담당 ${esc(c.owner || '미배정')}</span>`, `
-    ${c.memo ? `<div class="sect memo-sect"><h4>메모</h4><p class="memo-text">${esc(c.memo)}</p></div>` : ''}
+    <div class="sect memo-sect">
+      <div class="sect-head"><h4>메모</h4><button type="button" class="memo-edit-button" id="editCompanyMemo">${c.memo ? '수정' : '메모 추가'}</button></div>
+      <p class="memo-text${c.memo ? '' : ' dim'}" data-company-memo-display>${esc(c.memo || '등록된 메모가 없습니다.')}</p>
+    </div>
     <div class="sect"><h4>사업장 정보</h4><dl class="kv">
       <dt>근로자 수</dt><dd>${workplace.employeeCount ? `${esc(workplace.employeeCount)}명` : '<span class="dim">—</span>'}</dd>
       <dt>관리번호</dt><dd>${copyLine(workplace.managementNumber, '사업장관리번호')}</dd>
@@ -1011,6 +1014,22 @@ function openCompany(c, docsEditMode) {
     </div>
     <div class="sect"><button class="btn primary" id="drawerDocsAction" style="width:100%">${docsEditMode ? '전체 저장' : '서류 수정'}</button></div>
   `, d => {
+    $('#editCompanyMemo', d).onclick = event => {
+      const trigger = event.currentTarget;
+      const display = $('[data-company-memo-display]', d);
+      openCompanyMemoEditor(c, trigger.closest('.memo-sect'), trigger, {
+        display,
+        onSaved: memo => {
+          display.textContent = memo || '등록된 메모가 없습니다.';
+          display.classList.toggle('dim', !memo);
+          trigger.textContent = memo ? '수정' : '메모 추가';
+          trigger.hidden = false;
+          display.hidden = false;
+          trigger.focus();
+          render();
+        }
+      });
+    };
     $('#editDocs', d).onclick = () => {
       openCompany(c, !docsEditMode);
       requestAnimationFrame(() => $('#editDocs', DRAWER)?.focus());
