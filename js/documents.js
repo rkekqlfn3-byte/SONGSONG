@@ -838,6 +838,20 @@ async function saveAllDrawerDocs(company) {
   return saved > 0;
 }
 
+/** 전체 저장 단추 두 곳(위·아래)이 같은 동작을 쓴다 */
+async function runSaveAllDocs(company, selector) {
+  const btn = DRAWER.querySelector(selector);
+  if (!btn || btn.disabled) return;
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '저장 중…';
+  try { await saveAllDrawerDocs(company); }
+  finally {
+    const live = DRAWER.querySelector(selector);
+    if (live) { live.disabled = false; live.textContent = label; live.focus(); }
+  }
+}
+
 /** 저장 단추를 잠깐 «저장됨»으로 바꿔 알려준다 */
 function flashSaveButton(btn) {
   btn.textContent = '저장됨';
@@ -898,6 +912,7 @@ function openCompany(c, docsEditMode) {
   const chk = STAGES.map(st => {
     const items = DOC_DEFS.filter(d => d.stage === st).map(d => {
       const has = filled(c.docs[d.k]);
+      // Tab은 «적는 칸»끼리만 옮겨 다닌다 — 저장 단추는 tabindex="-1" 로 건너뛴다
       const note = d.byCoach ? '<em>코치 공통</em>' : d.type === 'auto' ? '<em>+28일 자동</em>' : '';
       if (docsEditMode) {
         let control;
@@ -912,12 +927,12 @@ function openCompany(c, docsEditMode) {
             <input type="text" inputmode="numeric" placeholder="6/22" value="${esc(docCellText(c.docs[d.k]))}" data-doc-input="${esc(d.k)}" aria-label="${esc(d.label)} 날짜">
             <input type="text" class="doc-log-time" list="consultTimeOptions" placeholder="10:00" maxlength="8" value="${esc(to24Time(item.time))}" data-log-time="${d.linkConsult}" aria-label="${d.linkConsult}차 컨설팅 시간">
             <select class="doc-log-owner" data-searchable="off" data-log-owner="${d.linkConsult}" aria-label="${d.linkConsult}차 동행 담당자">${ownerOptions(item.visit ? item.owner : '')}</select>
-            <button class="drawer-doc-save" type="button" data-doc-save="${esc(d.k)}">저장</button>
+            <button class="drawer-doc-save" type="button" tabindex="-1" data-doc-save="${esc(d.k)}">저장</button>
           </div>`;
         } else {
           control = `<div class="drawer-doc-control">
             <input type="text" inputmode="numeric" placeholder="6/22" value="${esc(docCellText(c.docs[d.k]))}" data-doc-input="${esc(d.k)}">
-            <button class="drawer-doc-save" type="button" data-doc-save="${esc(d.k)}">저장</button>
+            <button class="drawer-doc-save" type="button" tabindex="-1" data-doc-save="${esc(d.k)}">저장</button>
           </div>`;
         }
         return `<div class="chk doc-row-edit ${has ? 'ok' : 'no'}" data-doc-row="${esc(d.k)}"><div class="mk">${has ? '●' : '○'}</div>` +
@@ -994,23 +1009,23 @@ function openCompany(c, docsEditMode) {
       <div class="coach-doc-note">서식8·9·10·통장 사본은 배정 코치의 공통값이며, 수정하면 같은 코치의 모든 기업에 반영됩니다.</div>
       <div class="checklist">${chk}</div>
     </div>
-    <div class="sect"><button class="btn primary" id="toMail" style="width:100%">이 기업으로 메일 작성 →</button></div>
+    <div class="sect"><button class="btn primary" id="drawerDocsAction" style="width:100%">${docsEditMode ? '전체 저장' : '서류 수정'}</button></div>
   `, d => {
     $('#editDocs', d).onclick = () => {
       openCompany(c, !docsEditMode);
       requestAnimationFrame(() => $('#editDocs', DRAWER)?.focus());
     };
+    // 맨 아래 큰 단추 — 보는 중에는 «서류 수정», 고치는 중에는 «전체 저장»
+    $('#drawerDocsAction', d).onclick = () => {
+      if (!docsEditMode) {
+        openCompany(c, true);
+        requestAnimationFrame(() => $('#drawerDocsAction', DRAWER)?.focus());
+        return;
+      }
+      runSaveAllDocs(c, '#drawerDocsAction');
+    };
     if (docsEditMode) {
-      const saveAll = $('#saveAllDocs', d);
-      saveAll.onclick = async () => {
-        saveAll.disabled = true;
-        saveAll.textContent = '저장 중';
-        try { await saveAllDrawerDocs(c); }
-        finally {
-          const live = $('#saveAllDocs', DRAWER);
-          if (live) { live.disabled = false; live.textContent = '전체 저장'; live.focus(); }
-        }
-      };
+      $('#saveAllDocs', d).onclick = () => runSaveAllDocs(c, '#saveAllDocs');
       d.querySelectorAll('[data-doc-toggle]').forEach(box => {
         box.onchange = async e => {
           const check = e.currentTarget;
@@ -1095,14 +1110,10 @@ function openCompany(c, docsEditMode) {
       requestAnimationFrame(() => $('#extensionCheck', DRAWER)?.focus());
       toast(enabled ? `${c.name} 종료 기한을 2주 연장했습니다.` : `${c.name} 2주 연장을 해제했습니다.`);
     };
-    $('#toMail', d).onclick = () => {
-      closeDrawer();
-      go('mail', { company: c.name, stage: guessStage(c), target: '기업 담당자', manual: '' });
-    };
   });
 }
 
-/** 진행현황으로 메일 단계를 추정 */
+/** 진행현황으로 메일 단계를 추정 — 메일 작성기 탭에서 쓴다 */
 function guessStage(c) {
   return ({ 검토요청: '신청단계', 검토완료: '신청단계', 컨설팅진행: '실시단계', 보고서제출: '실시단계', 지급준비: '지급단계', 지급완료: '지급단계' })[c.status] || '신청단계';
 }
@@ -1121,7 +1132,7 @@ function openCoach(c, docsEditMode) {
       ? `<label class="drawer-doc-check"><input type="checkbox" data-coach-doc-toggle="${esc(def.k)}"${has ? ' checked' : ''}><span>제출</span></label>`
       : `<div class="drawer-doc-control">
           <input type="text" inputmode="numeric" placeholder="6/22" value="${esc(docCellText(raw))}" data-coach-doc-input="${esc(def.k)}">
-          <button class="drawer-doc-save" type="button" data-coach-doc-save="${esc(def.k)}">저장</button>
+          <button class="drawer-doc-save" type="button" tabindex="-1" data-coach-doc-save="${esc(def.k)}">저장</button>
         </div>`;
     return `<div class="chk doc-row-edit ${has ? 'ok' : 'no'}" data-coach-doc-row="${esc(def.k)}"><div class="mk">${has ? '●' : '○'}</div>` +
       `<div class="lb">${esc(def.label)}<em>코치 공통</em></div>${control}</div>`;
