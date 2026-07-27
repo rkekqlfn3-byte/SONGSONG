@@ -26,9 +26,10 @@
  *   ?action=updateCoachDocs&payload=... 코치 공통 서식8·9·10·통장사본 수정
  *   ?action=updateExtension&payload=... 기업 종료기한 2주 연장 여부 수정
  *   ?action=updateMemo&payload=...      기업 메모만 수정
+ *   ?action=syncStatuses&payload=...   1차 컨설팅일 기준 진행현황 자동 갱신
  */
 
-const VERSION = '2026-07-27-status1';
+const VERSION = '2026-07-27-consult1';
 
 const SPREADSHEET_ID = '1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q';
 /*
@@ -180,6 +181,7 @@ const FORMULAS = [
 function doGet(e) {
   const action = e && e.parameter ? e.parameter.action : '';
   let payload = {};
+  let skipDefaultAudit = false;
   try {
     if (action === 'ping') return response_({ ok: true, message: 'ready', version: VERSION }, e);
     if (action === 'diag') return response_({ ok: true, version: VERSION, sheets: diag_() }, e);
@@ -218,6 +220,10 @@ function doGet(e) {
     } else if (action === 'updateMemo') {
       const updated = updateMemo_(payload);
       result = { company: updated.company, row: updated.row, memo: updated.memo };
+    } else if (action === 'syncStatuses') {
+      result = syncConsultationStatuses_('web');
+      // 실제 변경이 있을 때 syncConsultationStatuses_가 자동 변경 내역을 직접 기록한다.
+      skipDefaultAudit = true;
     } else if (action === 'updateCompany') {
       const updated = updateCompany_(payload);
       result = { company: updated.company, row: updated.row, docRow: updated.docRow };
@@ -228,7 +234,7 @@ function doGet(e) {
       throw new Error('지원하지 않는 요청입니다.');
     }
 
-    const auditLogged = appendAuditLog_(auditRecord_(action, payload, result, true, ''));
+    const auditLogged = skipDefaultAudit ? !!result.auditLogged : appendAuditLog_(auditRecord_(action, payload, result, true, ''));
     return response_(Object.assign({ ok: true, version: VERSION, auditLogged: auditLogged }, result), e);
   } catch (error) {
     if (action && action !== 'ping' && action !== 'diag' && action !== 'getAuditLogs') {
@@ -236,6 +242,124 @@ function doGet(e) {
     }
     return response_({ ok: false, error: error && error.message ? error.message : String(error) }, e);
   }
+}
+
+/* ============================================================
+   1차 컨설팅일 기준 진행현황 자동 변경
+   ============================================================ */
+const CONSULTATION_STATUS_TRIGGER = 'runConsultationStatusAutomation';
+const CONSULTATION_READY_STATUSES = { '검토요청': true, '검토완료': true };
+
+/** 시트에서 읽은 날짜를 비교 가능한 yyyy-mm-dd로 맞춘다. */
+function consultationDateKey_(value, zone) {
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return Utilities.formatDate(value, zone, 'yyyy-MM-dd');
+  }
+  const text = String(value == null ? '' : value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  if (/^\d+(?:\.\d+)?$/.test(text)) {
+    const serial = Math.round(Number(text));
+    if (serial >= 20000 && serial <= 80000) {
+      return Utilities.formatDate(new Date(1899, 11, 30 + serial, 12, 0, 0), zone, 'yyyy-MM-dd');
+    }
+  }
+  return '';
+}
+
+/**
+ * 검토요청·검토완료 기업만 대상으로 한다.
+ * 1차 컨설팅일이 없으면 기존 «컨설팅 시작»을 호환용 날짜로 사용한다.
+ */
+function advanceConsultationStatuses_(book, now) {
+  const source = sourceSheet_(book);
+  const columns = sourceColumns_(source);
+  const lastRow = source.getLastRow();
+  const count = Math.max(0, lastRow - SOURCE_FIRST_ROW + 1);
+  const zone = book.getSpreadsheetTimeZone() || Session.getScriptTimeZone() || 'Asia/Seoul';
+  const today = Utilities.formatDate(now || new Date(), zone, 'yyyy-MM-dd');
+  if (!count || !columns.status || !columns.companyName || (!columns.consult1Date && !columns.startDate)) {
+    return { updated: 0, companies: [], changes: [], today: today };
+  }
+
+  const statuses = source.getRange(SOURCE_FIRST_ROW, columns.status, count, 1).getDisplayValues();
+  const names = source.getRange(SOURCE_FIRST_ROW, columns.companyName, count, 1).getDisplayValues();
+  const firstDates = columns.consult1Date
+    ? source.getRange(SOURCE_FIRST_ROW, columns.consult1Date, count, 1).getValues()
+    : [];
+  const legacyDates = columns.startDate
+    ? source.getRange(SOURCE_FIRST_ROW, columns.startDate, count, 1).getValues()
+    : [];
+  const ranges = [];
+  const changes = [];
+
+  for (let i = 0; i < count; i++) {
+    const status = String(statuses[i][0] || '').trim();
+    if (!CONSULTATION_READY_STATUSES[status]) continue;
+    const firstRaw = firstDates[i] && firstDates[i][0];
+    const legacyRaw = legacyDates[i] && legacyDates[i][0];
+    const dueDate = consultationDateKey_(firstRaw, zone) || consultationDateKey_(legacyRaw, zone);
+    if (!dueDate || dueDate > today) continue;
+    const row = SOURCE_FIRST_ROW + i;
+    const company = String(names[i][0] || '').trim() || ('행 ' + row);
+    ranges.push(columnLetter_(columns.status) + row);
+    changes.push({ company: company, row: row, dueDate: dueDate, before: status, after: '컨설팅진행' });
+  }
+
+  if (ranges.length) {
+    source.getRangeList(ranges).setValue('컨설팅진행');
+    SpreadsheetApp.flush();
+  }
+  return {
+    updated: changes.length,
+    companies: changes.map(function (item) { return item.company; }),
+    changes: changes,
+    today: today
+  };
+}
+
+function syncConsultationStatuses_(sourceLabel) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  let result;
+  try {
+    const book = SpreadsheetApp.openById(SPREADSHEET_ID);
+    result = advanceConsultationStatuses_(book, new Date());
+  } finally {
+    lock.releaseLock();
+  }
+  result.auditLogged = false;
+  if (result.updated) {
+    result.auditLogged = appendAuditLog_({
+      requestId: 'consult_auto_' + Date.now(),
+      actor: '자동화',
+      action: 'AUTO_STATUS',
+      target: result.companies.join(', '),
+      detail: '1차 컨설팅일 도래 · 진행현황을 컨설팅진행으로 자동 변경 (' + result.updated + '건)',
+      before: result.changes.map(function (item) { return { company: item.company, status: item.before }; }),
+      after: result.changes.map(function (item) { return { company: item.company, status: item.after, firstConsultation: item.dueDate }; }),
+      source: sourceLabel || 'automation',
+      success: true,
+      error: ''
+    });
+  }
+  return result;
+}
+
+/** 매시간 자동 실행되는 함수. 웹을 열지 않아도 시트의 진행현황을 갱신한다. */
+function runConsultationStatusAutomation() {
+  return syncConsultationStatuses_('time-trigger');
+}
+
+/** Apps Script 편집기에서 처음 한 번 실행해 매시간 자동 점검을 설치한다. */
+function installConsultationStatusAutomation() {
+  ScriptApp.getProjectTriggers().forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === CONSULTATION_STATUS_TRIGGER) ScriptApp.deleteTrigger(trigger);
+  });
+  ScriptApp.newTrigger(CONSULTATION_STATUS_TRIGGER).timeBased().everyHours(1).create();
+  const first = runConsultationStatusAutomation();
+  const message = '1차 컨설팅일 자동 상태 변경 설치 완료 · 현재 ' + first.updated + '건 변경';
+  console.log(message);
+  return message;
 }
 
 /** 각 탭이 실제로 몇 행 몇 열인지 — 범위를 벗어나는 오류의 원인을 보려고 */

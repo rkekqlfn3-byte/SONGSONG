@@ -7,6 +7,7 @@ const WRITE_ENDPOINT_KEY = LS_KEY + ':writeEndpoint';
 const BASE_YEAR_KEY = LS_KEY + ':baseYear';
 const EXTENSION_KEY = LS_KEY + ':twoWeekExtensions';
 const LAST_SYNC_KEY = LS_KEY + ':lastSuccessfulSync';
+const AUTO_STATUS_CHECK_KEY = LS_KEY + ':consultationStatusCheck';
 const WEB_OPERATOR_KEY = LS_KEY + ':webOperatorName';
 const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q/edit';
 /*
@@ -370,6 +371,20 @@ async function syncFromSheetOnce(endpoint, opts) {
   setSyncHealth('busy', '동기화 중…');
   if (opts.inDialog) setSyncState('Google Sheet에서 데이터를 확인하고 있습니다…', '');
   try {
+    let automaticStatus = null;
+    if (!opts.testOnly) {
+      const checkedToday = localStorage.getItem(AUTO_STATUS_CHECK_KEY) === iso(TODAY);
+      const shouldCheck = opts.reason !== 'automatic' || !checkedToday;
+      if (shouldCheck) {
+        try {
+          automaticStatus = await requestSheetWrite(writeEndpoint(), 'syncStatuses', {});
+          localStorage.setItem(AUTO_STATUS_CHECK_KEY, iso(TODAY));
+        } catch (error) {
+          // Apps Script 새 버전을 아직 배포하지 않았어도 일반 시트 동기화는 계속한다.
+          console.warn('1차 컨설팅일 자동 상태 점검을 건너뜁니다.', error);
+        }
+      }
+    }
     const raw = await fetchSheetData(clean);
     if (opts.testOnly) {
       setSyncState('연결 성공 — 필요한 시트 4개를 모두 확인했습니다.', 'ok');
@@ -386,7 +401,13 @@ async function syncFromSheetOnce(endpoint, opts) {
     const completedAt = new Date().toISOString();
     try { localStorage.setItem(LAST_SYNC_KEY, completedAt); } catch {}
     setSyncHealth('ok', `최근 동기화 ${syncClock(completedAt)}`);
-    if (!opts.silent) toast('Google Sheet 최신 데이터로 동기화했습니다.');
+    if (automaticStatus && automaticStatus.updated) {
+      toast(`${automaticStatus.updated}개 기업을 1차 컨설팅일에 맞춰 «컨설팅진행»으로 변경했습니다.`);
+      if (typeof addLog === 'function') {
+        addLog('AUTO_STATUS', automaticStatus.companies.join(', '),
+          `1차 컨설팅일 도래 · 컨설팅진행 자동 변경 ${automaticStatus.updated}건`, 'info');
+      }
+    } else if (!opts.silent) toast('Google Sheet 최신 데이터로 동기화했습니다.');
     if (opts.inDialog) setSyncState('동기화 완료 — 연결 주소를 저장했습니다.', 'ok');
     if (!opts.silent && typeof addLog === 'function') {
       addLog('SYNC', 'Google Sheet', `시트 4개 탭 수동 동기화 완료 (${raw.sheets ? Object.keys(raw.sheets).length : 0}개 탭)`, 'ok');
