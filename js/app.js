@@ -13,13 +13,17 @@
     localStorage.setItem(LS_KEY + ':theme', next);
   };
 
-  // 데이터: 저장본 우선, 실패하면 내장 스냅샷
+  /*
+   * 데이터는 이 브라우저에 남아 있던 최근 내용을 먼저 보여주고, 곧바로 시트에서 새로 받는다.
+   * 내장 스냅샷은 비워두었으므로(개인정보가 웹에 같이 올라가지 않게), 저장본이 없으면
+   * 시트에서 받아올 때까지 «불러오는 중» 화면을 보여준다.
+   */
   let loaded = false;
   try {
     const saved = localStorage.getItem(LS_KEY);
     if (saved) { applyData(JSON.parse(saved), '저장된 최근 데이터', false); loaded = true; }
   } catch (e) { console.warn('저장된 데이터를 읽지 못했습니다', e); }
-  if (!loaded) applyData(EMBEDDED, '내장 스냅샷', false);
+  if (!loaded) showDataPlaceholder('Google Sheet에서 자료를 불러오는 중입니다…', '');
 
   // 탭
   $('#tabs').onclick = e => { const b = e.target.closest('.tab'); if (b) go(b.dataset.tab); };

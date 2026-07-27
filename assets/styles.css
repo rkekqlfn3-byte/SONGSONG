@@ -1402,3 +1402,15 @@ tbody tr.sel td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
     grid-column:1 / -1;grid-row:2;max-width:100%;margin-left:0;
   }
 }
+
+/* 자료를 아직 못 받았을 때 — 빈 화면 대신 보여준다 */
+.data-placeholder{
+  display:grid; place-items:center; gap:14px; text-align:center;
+  padding:64px 24px; color:var(--ink-2);
+}
+.data-placeholder-mark{
+  width:46px; height:46px; border-radius:50%; display:grid; place-items:center;
+  background:var(--wash); color:var(--accent); font-size:20px; font-weight:700;
+}
+.data-placeholder.bad .data-placeholder-mark{ background:rgba(200,60,60,.12); color:var(--critical); }
+.data-placeholder p{ margin:0; font-size:13.5px; line-height:1.7; max-width:420px; }

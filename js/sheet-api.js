@@ -432,6 +432,10 @@ async function syncFromSheetOnce(endpoint, opts) {
     setSyncHealth('bad', '동기화 실패 · 재시도');
     if (opts.inDialog) setSyncState(msg, 'bad');
     else if (!opts.silent) toast(msg + ' 기존 데이터 유지');
+    // 보여줄 자료가 아직 하나도 없으면 빈 화면 대신 이유를 적어준다
+    if (typeof hasNoData === 'function' && hasNoData() && typeof showDataPlaceholder === 'function') {
+      showDataPlaceholder(msg, 'bad');
+    }
     if (!opts.silent && typeof addLog === 'function') addLog('SYNC', 'Google Sheet', msg, 'bad', { success: false });
     return false;
   } finally {

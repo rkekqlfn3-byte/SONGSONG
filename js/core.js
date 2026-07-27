@@ -803,3 +803,25 @@ function renderActivityLogs() {
     `;
   }).join('');
 }
+
+/**
+ * 아직 보여줄 자료가 없을 때의 화면.
+ * 내장 스냅샷을 비워두었기 때문에, 처음 여는 브라우저는 시트에서 받아올 때까지 여기에 머문다.
+ * 연결이 실패하면 같은 자리에 이유를 적어준다.
+ */
+function showDataPlaceholder(message, tone) {
+  if (!VIEW) return;
+  $('#tabs').innerHTML = '';
+  VIEW.innerHTML = `<div class="data-placeholder${tone ? ' ' + tone : ''}">
+    <div class="data-placeholder-mark" aria-hidden="true">${tone === 'bad' ? '!' : '⟳'}</div>
+    <p>${esc(message)}</p>
+    <button type="button" class="btn primary" id="placeholderRetry">지금 불러오기</button>
+  </div>`;
+  const retry = $('#placeholderRetry');
+  if (retry) retry.onclick = () => {
+    showDataPlaceholder('Google Sheet에서 자료를 불러오는 중입니다…', '');
+    syncFromSheet(localStorage.getItem(SHEET_ENDPOINT_KEY) || DEFAULT_SHEET_URL, { force: true, reason: 'placeholder' });
+  };
+}
+/** 자료 없이 화면만 떠 있는 상태인가 */
+const hasNoData = () => !state.M || !state.M.companies || !state.M.companies.length;
