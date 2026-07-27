@@ -476,10 +476,6 @@ function openCompanyEditDialog(company) {
   rememberCompanyForm();
   requestAnimationFrame(() => $('#newStatus').focus());
 }
-/**
- * 서류 현황·상세창에서 «컨설팅 수행일지»를 고쳤을 때, 같은 차수의 컨설팅일도 시트에 같이 반영한다.
- * 지운 경우(dateIso가 빈 값)는 일정을 건드리지 않는다 — 서류만 지웠는데 일정까지 날아가지 않게.
- */
 /** 동행 표시된 일정 중 가장 늦은 것 — 시트의 «방문(최근일자)»와 같은 기준 */
 function latestVisitOf(items) {
   const visits = (items || []).filter(x => x && x.visit && x.date);
@@ -487,90 +483,85 @@ function latestVisitOf(items) {
   const last = visits.sort((a, b) => a.date - b.date)[visits.length - 1];
   return { owner: last.owner || '', dateRaw: iso(last.date), date: last.date, time: last.time || '' };
 }
-async function syncConsultDateFromDoc(company, index, dateIso, extra) {
-  if (!company || !dateIso) return false;
+
+/**
+ * «컨설팅 수행일지»를 고쳤을 때 함께 보낼 컨설팅 일정 값을 만든다.
+ * 서류 저장과 «같은 요청»에 실어 보내므로 시트 왕복이 한 번으로 끝난다.
+ * changes = [{ index, dateIso, extra }] · extra = 상세창에서 같이 적은 { time, owner }
+ * 바뀐 게 없으면 null을 돌려준다 (보낼 필요가 없다).
+ */
+function consultationUpdateFor(company, changes) {
+  if (!company) return null;
   const items = company.consultations || [{}, {}];
-  const item = items[index - 1] || {};
-  const before = item.date ? iso(item.date) : '';
-  const beforeTime = to24Time(item.time);
-  const beforeOwner = item.visit ? String(item.owner || '').trim() : '';
-  // 상세창 수행일지 줄에서 같이 적은 시간·동행 담당자 (없으면 지금 값을 그대로 둔다)
-  const time = extra ? to24Time(extra.time) : beforeTime;
-  const owner = extra ? String(extra.owner || '').trim() : beforeOwner;
-  const nothingChanged = before === dateIso && time === beforeTime && owner === beforeOwner;
-  if (nothingChanged) return false;                     // 바뀐 게 없으면 보낼 필요가 없다
-  const dates = [
-    items[0] && items[0].date ? iso(items[0].date) : '',
-    items[1] && items[1].date ? iso(items[1].date) : '',
-  ];
-  dates[index - 1] = dateIso;
-  const times = [to24Time(items[0] && items[0].time), to24Time(items[1] && items[1].time)];
-  const visits = [items[0] && items[0].visit ? 'O' : '', items[1] && items[1].visit ? 'O' : ''];
-  const owners = [(items[0] && items[0].owner) || '', (items[1] && items[1].owner) || ''];
-  times[index - 1] = time;
-  visits[index - 1] = owner ? 'O' : '';                 // 동행 담당자를 고르면 동행, 비우면 해제
-  owners[index - 1] = owner;
-  // 1차를 고치면 컨설팅 시작·내부 종료기한(+28일)도 같이 옮기고, 2차만 고칠 때는 기존 값을 지킨다
-  const firstDate = index === 1 ? isoToDate(dateIso) : (isoToDate(dates[0]) || company.start || null);
-  const endDate = index === 1
-    ? (firstDate ? iso(addDays(firstDate, 28)) : '')
-    : (company.end ? iso(company.end) : '');
-  const workplace = company.workplace || {};
-  const payload = {
-    originalCompanyName: company.name,
-    companyName: company.name,
-    status: company.status || '검토요청',
-    owner: company.owner || '',
-    contactName: company.contact.name || '',
-    contactTitle: company.contact.title || '',
-    contactPhone: company.contact.phone || '',
-    contactEmail: company.contact.email || '',
-    memo: company.memo || '',
-    employeeCount: workplace.employeeCount || '',
-    workplaceNumber: workplace.managementNumber || '',
-    companyAddress: workplace.address || '',
-    agencyBranch: workplace.agencyBranch || '',
-    hrd4uId: workplace.hrd4uId || '',
-    startDate: firstDate ? iso(firstDate) : '',
-    endDate,
-    coachName: company.coachName || '',
-    coachEmail: company.coachEmail || '',
-    coachPhone: company.coachPhone || '',
-    scheduleChanged: true,
-    consult1Date: dates[0],
-    consult1Time: times[0],
-    consult1Visit: visits[0],
-    consult1Owner: owners[0],
-    consult2Date: dates[1],
-    consult2Time: times[1],
-    consult2Visit: visits[1],
-    consult2Owner: owners[1],
-    _audit: {
-      type: 'EDIT',
-      target: company.name,
-      detail: `${index}차 컨설팅 ${before ? md(isoToDate(before)) : '미정'} → ` +
-        `${md(isoToDate(dateIso))}${time ? ' ' + time : ''}${owner ? ' · 동행 ' + owner : ''} (수행일지 연동)`,
-      tone: 'info',
-      before: { [`consult${index}Date`]: before, [`consult${index}Time`]: beforeTime, [`consult${index}Owner`]: beforeOwner },
-      after: { [`consult${index}Date`]: dateIso, [`consult${index}Time`]: time, [`consult${index}Owner`]: owner }
-    }
-  };
-  await requestSheetWrite(writeEndpoint(), 'updateCompany', payload);
-  // 화면에 들고 있는 값도 같이 맞춘다 — 다음 동기화까지 어긋나 보이지 않게
-  items[index - 1] = Object.assign({}, item, {
-    dateRaw: dateIso, date: isoToDate(dateIso),
-    time, visit: !!owner, owner,
+  const slots = [0, 1].map(i => {
+    const item = items[i] || {};
+    return {
+      date: item.date ? iso(item.date) : '',
+      time: to24Time(item.time),
+      owner: item.visit ? String(item.owner || '').trim() : '',
+    };
   });
-  company.consultations = items;
-  company.latestVisit = latestVisitOf(items) || company.latestVisit;
-  if (index === 1) {
-    company.startRaw = payload.startDate;
-    company.start = firstDate;
-    company.endRaw = payload.endDate;
-    company.end = isoToDate(payload.endDate);
+  const before = slots.map(slot => Object.assign({}, slot));
+  let touched = false;
+  let firstChanged = false;
+  const labels = [];
+  (changes || []).forEach(change => {
+    if (!change || !change.index || !change.dateIso) return;   // 지운 경우는 일정을 건드리지 않는다
+    const slot = slots[change.index - 1];
+    const time = change.extra ? to24Time(change.extra.time) : slot.time;
+    const owner = change.extra ? String(change.extra.owner || '').trim() : slot.owner;
+    if (slot.date === change.dateIso && slot.time === time && slot.owner === owner) return;
+    slot.date = change.dateIso;
+    slot.time = time;
+    slot.owner = owner;                      // 담당자를 고르면 동행, 비우면 동행 해제
+    touched = true;
+    if (change.index === 1) firstChanged = true;
+    labels.push(`${change.index}차 ${md(isoToDate(change.dateIso))}${time ? ' ' + time : ''}${owner ? ' · 동행 ' + owner : ''}`);
+  });
+  if (!touched) return null;
+
+  // 1차가 바뀌면 컨설팅 시작·내부 종료기한(+28일)도 같이 옮기고, 2차만 바뀌면 기존 값을 지킨다
+  const start = slots[0].date ? isoToDate(slots[0].date) : (company.start || null);
+  const endDate = firstChanged
+    ? (start ? iso(addDays(start, 28)) : '')
+    : (company.end ? iso(company.end) : '');
+  const fields = {
+    scheduleChanged: true,
+    startDate: start ? iso(start) : '',
+    endDate,
+    consult1Date: slots[0].date,
+    consult1Time: slots[0].time,
+    consult1Visit: slots[0].owner ? 'O' : '',
+    consult1Owner: slots[0].owner,
+    consult2Date: slots[1].date,
+    consult2Time: slots[1].time,
+    consult2Visit: slots[1].owner ? 'O' : '',
+    consult2Owner: slots[1].owner,
+  };
+  /** 저장이 끝난 뒤 화면이 들고 있는 값도 같이 맞춘다 — 다음 동기화까지 어긋나 보이지 않게 */
+  const apply = () => {
+    const next = [0, 1].map(i => Object.assign({}, items[i] || {}, {
+      dateRaw: slots[i].date,
+      date: isoToDate(slots[i].date),
+      time: slots[i].time,
+      visit: !!slots[i].owner,
+      owner: slots[i].owner,
+    }));
+    company.consultations = next;
+    company.latestVisit = latestVisitOf(next) || company.latestVisit;
+    company.startRaw = fields.startDate;
+    company.start = isoToDate(fields.startDate);
+    company.endRaw = fields.endDate;
+    company.end = isoToDate(fields.endDate);
     if (typeof updateCompanyDeadline === 'function') updateCompanyDeadline(company);
-  }
-  return true;
+  };
+  return {
+    fields,
+    apply,
+    summary: labels.join(', '),
+    before: { consult1: before[0], consult2: before[1] },
+    after: { consult1: slots[0], consult2: slots[1] },
+  };
 }
 
 /**
@@ -1016,13 +1007,18 @@ async function saveCompany() {
       try { localStorage.setItem(EXTENSION_KEY, JSON.stringify(twoWeekExtensions)); } catch {}
     }
     closeCompanyDialog({ force: true });        // 저장이 끝났으니 다시 묻지 않는다
-    const synced = await syncFromSheet(localStorage.getItem(SHEET_ENDPOINT_KEY) || DEFAULT_SHEET_URL, { silent: true, reason: 'after-write' });
-    if (synced) {
-      go('comp', { q: companyName, status: '', owner: '', coach: '' });
-      toast(`${companyName} ${wasEditing ? '수정' : '등록'} 완료`);
-    } else {
-      toast(`시트 ${wasEditing ? '수정' : '저장'} 완료 — 잠시 후 동기화 버튼을 눌러주세요.`);
-    }
+    toast(`${companyName} ${wasEditing ? '수정' : '등록'} 완료`);
+    /*
+     * 시트 전체 다시 읽기는 «기다리지 않는다» — 저장은 이미 끝났고,
+     * 다 내려받을 때까지 창을 붙잡아두면 1~3초를 그냥 서 있게 된다.
+     * 목록은 다 읽힌 뒤 알아서 새로 그려진다.
+     */
+    syncFromSheet(localStorage.getItem(SHEET_ENDPOINT_KEY) || DEFAULT_SHEET_URL, { silent: true, reason: 'after-write' })
+      .then(synced => {
+        if (synced) go('comp', { q: companyName, status: '', owner: '', coach: '' });
+        else toast('시트에서 최신 내용을 읽지 못했습니다 — 동기화 버튼을 눌러주세요.');
+      })
+      .catch(error => console.error(error));
   } catch (e) {
     console.error(e);
     setCompanyState('저장 실패 — ' + (e.message || '저장 연결을 확인하세요.'), 'bad');

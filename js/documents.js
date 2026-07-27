@@ -429,35 +429,33 @@ async function commitDocCell(td, company, def, entered, opts) {
   if (td) td.classList.add('saving');
   docSaving.add(lock);
 
+  // 수행일지를 고치면 같은 차수의 컨설팅 일정도 «같은 요청»에 실어 보낸다 (왕복 한 번)
+  const schedule = def.linkConsult && sent
+    ? consultationUpdateFor(company, [{
+        index: def.linkConsult, dateIso: sent,
+        extra: readDrawerConsultInputs(def.linkConsult, company),
+      }])
+    : null;
+
   try {
     const beforeText = filled(rollback[def.k]) ? docCellText(rollback[def.k]) : '미제출';
     const afterText = sent ? docCellText(localDocValue(def.k, sent)) : '미제출';
-    await requestSheetWrite(writeEndpoint(), 'updateDocs', {
+    const response = await requestSheetWrite(writeEndpoint(), 'updateDocs', Object.assign({
       companyName: company.name,
       docs,
       _audit: {
         type: 'DOC',
         target: company.name,
-        detail: `${def.label}: ${beforeText} → ${afterText}`,
+        detail: `${def.label}: ${beforeText} → ${afterText}` + (schedule ? ` · 컨설팅 일정 ${schedule.summary}` : ''),
         tone: 'info',
-        before: { [def.k]: beforeText },
-        after: { [def.k]: afterText }
+        before: Object.assign({ [def.k]: beforeText }, schedule ? schedule.before : {}),
+        after: Object.assign({ [def.k]: afterText }, schedule ? schedule.after : {})
       }
-    });
+    }, schedule ? schedule.fields : {}));
     if (td) td.classList.remove('saving');
-    // 수행일지를 고치면 같은 차수의 컨설팅일도 시트에 같이 맞춘다 (반대 방향 연동)
-    let scheduleSynced = false;
-    if (def.linkConsult && sent) {
-      try {
-        scheduleSynced = await syncConsultDateFromDoc(
-          company, def.linkConsult, sent, readDrawerConsultInputs(def.linkConsult, company));
-        if (scheduleSynced) render();
-      } catch (error) {
-        console.error(error);
-        toast(`${def.label}은 저장됐지만 컨설팅일 반영은 실패했습니다 — ${error.message || '저장 연결을 확인하세요'}`);
-      }
-    }
-    const alsoSchedule = scheduleSynced ? ` · ${def.linkConsult}차 컨설팅일도 맞춤` : '';
+    const scheduleSaved = schedule && scheduleWasSaved(response);
+    if (scheduleSaved) { schedule.apply(); render(); }
+    const alsoSchedule = scheduleSaved ? ` · ${def.linkConsult}차 컨설팅 일정도 맞춤` : '';
     /*
      * 되돌리기를 띄우는 기준 — 되돌릴 «잃은 값»이 있을 때만.
      *   O 표시  : 클릭 한 번에 저장되므로 항상
@@ -471,7 +469,7 @@ async function commitDocCell(td, company, def, entered, opts) {
         : sent ? docCellText(localDocValue(def.k, sent)) : '지움';
       toastUndo(`${company.name} · ${def.label} ${now}${alsoSchedule}`,
         () => commitDocCell(td, company, def, back, { isUndo: true }));
-    } else if (scheduleSynced) {
+    } else if (scheduleSaved) {
       toast(`${company.name} · ${def.label} ${docCellText(localDocValue(def.k, sent))} 저장${alsoSchedule}`);
     } else {
       noteSaved();
@@ -547,6 +545,66 @@ async function commitCoachDoc(td, coach, def, sent, opts) {
     return false;
   } finally {
     docSaving.delete(lock);
+  }
+}
+
+/**
+ * 코치 공통 서류 여러 칸을 «한 번의 통신»으로 저장한다 (전체 저장용).
+ * 담당 기업 전체에 반영되므로 확인도 한 번만 묻는다.
+ */
+async function saveCoachDocsBulk(coach, changes, year) {
+  if (!coach) { toast('배정된 코치가 없습니다'); return false; }
+  const docs = {};
+  changes.forEach(x => { docs[x.def.k] = docSendValue(x.def, x.entered, year); });
+  const mine = state.M.companies.filter(c => c.coachName === coach.name);
+  if (mine.length > 1) {
+    const what = changes.map(x => `· ${x.def.label} → ${x.entered || '지움'}`).join('\n');
+    const ok = confirm(
+      `${coach.name} 코치의 공통 서류 ${changes.length}칸을 바꿉니다.\n\n${what}\n\n` +
+      `이 코치가 담당하는 기업 ${mine.length}곳에 모두 반영됩니다.\n계속할까요?`
+    );
+    if (!ok) return false;
+  }
+  const rollbackCoach = {};
+  const rollback = new Map(mine.map(c => [c.name, Object.assign({}, c.docs)]));
+  const keys = Object.keys(docs);
+  keys.forEach(k => { rollbackCoach[k] = coach[byDocKey(k).byCoach]; });
+
+  const apply = per => {                              // per: 키 → 값 (되돌릴 때는 이전 값)
+    keys.forEach(k => { coach[byDocKey(k).byCoach] = per[k]; });
+    mine.forEach(c => {
+      keys.forEach(k => { c.docs[k] = per[k]; });
+      c.docCount = DOC_DEFS.filter(d => filled(c.docs[d.k])).length;
+    });
+    repaintDocCells(mine.map(c => c.name), keys);
+  };
+  const localValues = {};
+  keys.forEach(k => { localValues[k] = localDocValue(k, docs[k]); });
+  apply(localValues);                                 // 낙관적 반영
+
+  try {
+    await requestSheetWrite(writeEndpoint(), 'updateCoachDocs', {
+      coachName: coach.name,
+      docs,
+      _audit: {
+        type: 'COACH_DOC',
+        target: coach.name,
+        detail: `코치 공통 서류 ${changes.length}칸 한 번에 저장 — ` +
+          changes.map(x => `${x.def.label}: ${x.entered || '지움'}`).join(', ') +
+          ` · 담당 ${mine.length}개사 반영`,
+        tone: 'warn',
+        before: rollbackCoach,
+        after: Object.assign({ affectedCompanies: mine.length }, docs)
+      }
+    });
+    toast(`${coach.name} 코치 공통 ${changes.length}칸 — 담당 ${mine.length}곳 반영됨`);
+    return true;
+  } catch (e) {
+    console.error(e);
+    apply(rollbackCoach);
+    mine.forEach(c => { const old = rollback.get(c.name); if (old) c.docs = old; });
+    toast('코치 공통 서류 저장 실패 — ' + (e.message || '저장 연결을 확인하세요'));
+    return false;
   }
 }
 
@@ -639,6 +697,16 @@ function docRowValueText(company, def) {
   const owner = item.visit ? String(item.owner || '').trim() : '';
   return base + (time ? ` ${esc(time)}` : '') + (owner ? ` · 동행 ${esc(owner)}` : '');
 }
+/**
+ * 서류와 «같은 요청»으로 보낸 컨설팅 일정이 실제로 시트에 들어갔는지 확인한다.
+ * 시트 스크립트가 아직 옛 버전이면 이 표시가 없으므로, 반영된 척하지 않고 알려준다.
+ */
+function scheduleWasSaved(response) {
+  if (response && response.scheduleSaved) return true;
+  toast('컨설팅 일정은 아직 반영되지 않았습니다 — 시트 스크립트를 새 버전으로 배포해주세요.');
+  return false;
+}
+
 /** 상세창 수행일지 줄에 적어둔 시간·동행 담당자 — 없으면 null (서류 현황 표에서 고칠 때) */
 function readDrawerConsultInputs(index, company) {
   if (!index) return null;
@@ -704,7 +772,16 @@ async function saveAllDrawerDocs(company) {
   const scheduleOnly = changes.filter(x => x.scheduleOnly);
   let saved = 0;
 
-  if (mine.length) {
+  // 수행일지 줄 — 날짜·시간·동행 담당자를 컨설팅 일정에도 실어 보낸다 (같은 요청에)
+  const schedule = consultationUpdateFor(company, mine.concat(scheduleOnly)
+    .filter(x => x.def.linkConsult)
+    .map(x => ({
+      index: x.def.linkConsult,
+      dateIso: docSendValue(x.def, x.entered, year),
+      extra: readDrawerConsultInputs(x.def.linkConsult, company),
+    })));
+
+  if (mine.length || schedule) {
     const docs = {};
     mine.forEach(x => { docs[x.def.k] = docSendValue(x.def, x.entered, year); });
     // 약정 시작일을 고치면 종료일(+28일)도 같이 — 단, 종료일을 직접 적었으면 그 값을 지킨다
@@ -719,20 +796,23 @@ async function saveAllDrawerDocs(company) {
     company.docCount = DOC_DEFS.filter(d => filled(company.docs[d.k])).length;
     repaintDocCells([company.name], keys);
     try {
-      await requestSheetWrite(writeEndpoint(), 'updateDocs', {
+      const response = await requestSheetWrite(writeEndpoint(), 'updateDocs', Object.assign({
         companyName: company.name,
         docs,
         _audit: {
           type: 'DOC',
           target: company.name,
-          detail: `서류 ${mine.length}칸 한 번에 저장 — ` +
-            mine.map(x => `${x.def.label}: ${x.entered || '지움'}`).join(', '),
+          detail: (mine.length ? `서류 ${mine.length}칸 한 번에 저장 — ` +
+            mine.map(x => `${x.def.label}: ${x.entered || '지움'}`).join(', ') : '컨설팅 일정 수정') +
+            (schedule ? ` · 컨설팅 일정 ${schedule.summary}` : ''),
           tone: 'info',
-          before: rollback,
-          after: docs
+          before: Object.assign({}, rollback, schedule ? schedule.before : {}),
+          after: Object.assign({}, docs, schedule ? schedule.after : {})
         }
-      });
-      saved += mine.length;
+      }, schedule ? schedule.fields : {}));
+      const scheduleSaved = schedule && scheduleWasSaved(response);
+      saved += mine.length + (scheduleSaved ? scheduleOnly.length : 0);
+      if (scheduleSaved) schedule.apply();
     } catch (e) {
       console.error(e);
       keys.forEach(k => { company.docs[k] = rollback[k]; });
@@ -744,25 +824,10 @@ async function saveAllDrawerDocs(company) {
     }
   }
 
-  // 수행일지 줄 — 날짜·시간·동행 담당자를 컨설팅 일정에 맞춘다
-  for (const change of mine.concat(scheduleOnly)) {
-    if (!change.def.linkConsult) continue;
-    const dateIso = docSendValue(change.def, change.entered, year);
-    if (!dateIso) continue;
-    try {
-      const moved = await syncConsultDateFromDoc(company, change.def.linkConsult, dateIso,
-        readDrawerConsultInputs(change.def.linkConsult, company));
-      if (moved && change.scheduleOnly) saved++;
-    } catch (error) {
-      console.error(error);
-      toast(`${change.def.label}은 저장됐지만 컨설팅 일정 반영은 실패했습니다 — ${error.message || '저장 연결을 확인하세요'}`);
-    }
-  }
-
-  for (const change of coachChanges) {            // 코치 공통값은 한 건씩 (담당 기업 전체에 반영)
-    const ok = await saveCoachDoc(company.coach, change.def, change.entered);
-    if (ok) saved++;
-    else if (change.input) change.input.classList.add('bad');
+  if (coachChanges.length) {                      // 코치 공통값은 담당 기업 전체에 반영 — 한 번에 묶어 보낸다
+    const ok = await saveCoachDocsBulk(company.coach, coachChanges, year);
+    if (ok) saved += coachChanges.length;
+    else coachChanges.forEach(x => { if (x.input) x.input.classList.add('bad'); });
   }
 
   changes.forEach(change => refreshDrawerDocRow(company, change.def));
@@ -970,11 +1035,15 @@ function openCompany(c, docsEditMode) {
             return;
           }
           btn.disabled = true;
-          input.disabled = true;
           btn.textContent = '저장 중';
-          const saved = await saveDocCell(c, def, entered);
+          /*
+           * 시트 응답을 기다리지 않고 화면에는 먼저 반영한다 (commitDocCell이 값을 먼저 바꿔둔다).
+           * 입력칸은 잠그지 않아 다음 칸으로 바로 넘어갈 수 있고, 실패하면 그때 되돌린다.
+           */
+          const pending = saveDocCell(c, def, entered);
+          refreshDrawerDocRow(c, def);
+          const saved = await pending;
           btn.disabled = false;
-          input.disabled = false;
           btn.textContent = '저장';
           /*
            * 저장한 줄만 다시 그린다 — 아래·위 다른 칸에 적어둔 내용은 그대로 남는다.

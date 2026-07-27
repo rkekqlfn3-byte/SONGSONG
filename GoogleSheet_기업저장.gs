@@ -27,7 +27,7 @@
  *   ?action=updateExtension&payload=... 기업 종료기한 2주 연장 여부 수정
  */
 
-const VERSION = '2026-07-26-ux7';
+const VERSION = '2026-07-27-perf1';
 
 const SPREADSHEET_ID = '1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q';
 /*
@@ -195,7 +195,11 @@ function doGet(e) {
       result = { applied: setupFormulas_() };
     } else if (action === 'updateDocs') {
       const updated = updateDocs_(payload);
-      result = { company: updated.company, docRow: updated.docRow, wrote: updated.wrote };
+      // scheduleSaved = 컨설팅 일정까지 같은 요청에서 처리했는지 (앱이 이것으로 새 버전인지 판별한다)
+      result = {
+        company: updated.company, docRow: updated.docRow, wrote: updated.wrote,
+        scheduleSaved: updated.scheduleRow != null, row: updated.scheduleRow
+      };
     } else if (action === 'updateCoachDocs') {
       const updated = updateCoachDocs_(payload);
       result = { coach: updated.coach, coachRow: updated.coachRow, wrote: updated.wrote };
@@ -441,27 +445,38 @@ function setConsultationRowValues_(row, columns, schedule) {
   if (columns.visitTime) row[columns.visitTime - 1] = schedule.latestVisit ? schedule.latestVisit.time : '';
 }
 
-function writeConsultationCells_(sheet, row, columns, schedule) {
+/**
+ * 값은 한 줄 통째로 쓰고(setConsultationRowValues_), 날짜 칸의 «표시 형식»만 따로 입힌다.
+ * 형식은 값과 달리 한 번에 묶을 수 없어 날짜 열에만 최소로 건다.
+ */
+function formatConsultationCells_(sheet, row, columns) {
   CONSULTATION_COLUMNS.forEach(function (def) {
-    if (!columns[def.key]) return;
-    const cell = sheet.getRange(row, columns[def.key]);
-    cell.setValue(schedule[def.key]);
-    if (def.type === 'date') cell.setNumberFormat('MM/dd ddd');
+    if (def.type !== 'date' || !columns[def.key]) return;
+    sheet.getRange(row, columns[def.key]).setNumberFormat('MM/dd ddd');
   });
-  const latest = schedule.latestVisit;
-  if (columns.visitOwner) sheet.getRange(row, columns.visitOwner).setValue(latest ? latest.owner : '');
-  if (columns.visitDate) {
-    const cell = sheet.getRange(row, columns.visitDate);
-    cell.setValue(latest ? latest.date : '');
-    cell.setNumberFormat('MM/dd ddd');
-  }
-  if (columns.visitTime) sheet.getRange(row, columns.visitTime).setValue(latest ? latest.time : '');
+  if (columns.visitDate) sheet.getRange(row, columns.visitDate).setNumberFormat('MM/dd ddd');
 }
 
 function sourceWidth_(columns) {
   return Object.keys(columns).reduce(function (max, key) {
     return Math.max(max, columns[key]);
   }, 0);
+}
+
+/**
+ * 원본 탭의 한 줄을 «한 번에» 고쳐 쓴다. 칸마다 쓰면 열 수만큼 시트를 왕복해 느리다.
+ * 수식이 들어 있는 칸은 계산된 값이 아니라 «수식 그대로» 되돌려 써서 수식이 사라지지 않게 한다.
+ */
+function writeSourceRow_(sheet, row, columns, patch) {
+  const width = Math.max(sheet.getLastColumn(), sourceWidth_(columns));
+  const range = sheet.getRange(row, 1, 1, width);
+  const values = range.getValues()[0];
+  const formulas = range.getFormulas()[0];
+  for (let i = 0; i < width; i++) {
+    if (formulas[i]) values[i] = formulas[i];
+  }
+  patch(values);
+  range.setValues([values]);
 }
 
 function addCompany_(data) {
@@ -510,11 +525,10 @@ function addCompany_(data) {
     if (schedule) setConsultationRowValues_(row, columns, schedule);
 
     const insertedRow = appendStyledRow_(source, row);
-    if (schedule) writeConsultationCells_(source, insertedRow, columns, schedule);
+    if (schedule) formatConsultationCells_(source, insertedRow, columns);
     SpreadsheetApp.flush();   // 수식이 서류 탭에 새 행을 만들 때까지 기다린다
 
     const written = writeDocumentRow_(book, companyName, data.docs || {});
-    SpreadsheetApp.flush();
 
     return { company: companyName, row: insertedRow, docRow: written ? written.row : null };
   } finally {
@@ -578,19 +592,27 @@ function updateCompany_(data) {
       values.startDate = parseDate_(data.startDate);
       values.endDate = parseDate_(data.endDate);
     }
-    Object.keys(values).forEach(function (key) {
-      // 시트에 그 열이 없으면 건너뛴다 (헤더를 못 찾은 항목까지 쓰려다 오류가 나지 않게)
-      if (!columns[key]) return;
-      source.getRange(targetRow, columns[key]).setValue(values[key]);
+    /*
+     * 한 줄을 통째로 읽어 고칠 칸만 바꾼 뒤 «한 번에» 쓴다.
+     * 칸마다 setValue 하면 열 개수만큼 시트 서버를 왕복해 눈에 띄게 느리다.
+     */
+    writeSourceRow_(source, targetRow, columns, function (rowValues) {
+      Object.keys(values).forEach(function (key) {
+        // 시트에 그 열이 없으면 건너뛴다 (헤더를 못 찾은 항목까지 쓰려다 오류가 나지 않게)
+        if (!columns[key]) return;
+        rowValues[columns[key] - 1] = values[key];
+      });
+      if (schedule) setConsultationRowValues_(rowValues, columns, schedule);
     });
-    if (schedule) writeConsultationCells_(source, targetRow, columns, schedule);
-    SpreadsheetApp.flush();
+    if (schedule) formatConsultationCells_(source, targetRow, columns);
+
+    // 기업명을 바꾼 경우에만 서류 탭의 이름 열(수식)이 다시 계산될 때까지 기다린다
+    if (companyName !== originalName) SpreadsheetApp.flush();
 
     let written = writeDocumentRow_(book, companyName, data.docs || {});
     if (!written && companyName !== originalName) {
       written = writeDocumentRow_(book, originalName, data.docs || {});
     }
-    SpreadsheetApp.flush();
     return { company: companyName, row: targetRow, docRow: written ? written.row : null };
   } finally {
     lock.releaseLock();
@@ -630,11 +652,46 @@ function updateExtension_(data) {
     }
 
     source.getRange(targetRow, columns.twoWeekExtension).setValue(enabled ? 'O' : '');
-    SpreadsheetApp.flush();
     return { company: companyName, row: targetRow, extended: enabled };
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * 컨설팅 일정(1·2차 날짜·시간·동행)과 컨설팅 시작·종료기한만 원본 탭에 반영한다.
+ * scheduleChanged가 없으면 아무것도 하지 않는다. 기업 기본정보는 건드리지 않는다.
+ */
+function applyScheduleToSource_(book, companyName, data) {
+  const changed = data.scheduleChanged === true || String(data.scheduleChanged).toLowerCase() === 'true';
+  if (!changed) return null;
+  const source = sourceSheet_(book);
+  ensureConsultationColumns_(source);
+  const columns = sourceColumns_(source);
+  const schedule = consultationValues_(data);
+
+  const lastRow = source.getLastRow();
+  if (lastRow < SOURCE_FIRST_ROW) return null;
+  const names = source
+    .getRange(SOURCE_FIRST_ROW, columns.companyName, lastRow - SOURCE_FIRST_ROW + 1, 1)
+    .getDisplayValues();
+  let targetRow = 0;
+  for (let i = 0; i < names.length; i++) {
+    if (String(names[i][0] || '').trim() === companyName) { targetRow = SOURCE_FIRST_ROW + i; break; }
+  }
+  if (!targetRow) return null;
+
+  writeSourceRow_(source, targetRow, columns, function (rowValues) {
+    setConsultationRowValues_(rowValues, columns, schedule);
+    if (Object.prototype.hasOwnProperty.call(data, 'startDate') && columns.startDate) {
+      rowValues[columns.startDate - 1] = parseDate_(data.startDate);
+    }
+    if (Object.prototype.hasOwnProperty.call(data, 'endDate') && columns.endDate) {
+      rowValues[columns.endDate - 1] = parseDate_(data.endDate);
+    }
+  });
+  formatConsultationCells_(source, targetRow, columns);
+  return targetRow;
 }
 
 /** 이미 등록된 기업의 서류 날짜만 고쳐 쓴다 (대시보드 서류 현황 편집용) */
@@ -648,8 +705,9 @@ function updateDocs_(data) {
     const book = SpreadsheetApp.openById(SPREADSHEET_ID);
     const result = writeDocumentRow_(book, companyName, data.docs || {});
     if (!result) throw new Error('서류 탭에서 «' + companyName + '» 행을 찾지 못했습니다.');
-    SpreadsheetApp.flush();
-    return { company: companyName, docRow: result.row, wrote: result.wrote };
+    // 수행일지처럼 컨설팅 일정과 묶인 서류는 일정까지 같은 요청에서 처리한다 (왕복 한 번으로)
+    const scheduleRow = applyScheduleToSource_(book, companyName, data);
+    return { company: companyName, docRow: result.row, wrote: result.wrote, scheduleRow: scheduleRow };
   } finally {
     lock.releaseLock();
   }
@@ -666,7 +724,6 @@ function updateCoachDocs_(data) {
     const book = SpreadsheetApp.openById(SPREADSHEET_ID);
     const result = writeCoachDocumentRow_(book, coachName, data.docs || {});
     if (!result) throw new Error('훈련코치 탭에서 «' + coachName + '» 코치 행을 찾지 못했습니다.');
-    SpreadsheetApp.flush();
     return { coach: coachName, coachRow: result.row, wrote: result.wrote };
   } finally {
     lock.releaseLock();
@@ -689,12 +746,20 @@ function writeCoachDocumentRow_(book, coachName, docs) {
   }
   if (!target) return null;
 
+  // H~K가 붙어 있으므로 한 번에 읽고 한 번에 쓴다 (칸마다 쓰면 그만큼 왕복한다)
   const wrote = [];
-  COACH_DOCUMENT_COLUMNS.forEach(function (def) {
-    if (!Object.prototype.hasOwnProperty.call(docs, def.key)) return;
-    sheet.getRange(target, def.col).setValue(docValue_(def, docs[def.key]));
+  const changed = COACH_DOCUMENT_COLUMNS.filter(function (def) {
+    return Object.prototype.hasOwnProperty.call(docs, def.key);
+  });
+  if (!changed.length) return { row: target, wrote: wrote };
+  const first = COACH_DOCUMENT_COLUMNS[0].col;
+  const range = sheet.getRange(target, first, 1, COACH_DOCUMENT_COLUMNS.length);
+  const values = range.getValues()[0];
+  changed.forEach(function (def) {
+    values[def.col - first] = docValue_(def, docs[def.key]);
     wrote.push(def.key);
   });
+  range.setValues([values]);
   return { row: target, wrote: wrote };
 }
 
@@ -719,13 +784,39 @@ function writeDocumentRow_(book, companyName, docs) {
   }
   if (!target) return null;
 
+  /*
+   * 손으로 채우는 열은 F~L, P~S 처럼 «붙어 있는 덩어리»로 나뉜다.
+   * 덩어리 단위로 한 번에 읽고 한 번에 써서 왕복을 줄인다.
+   * 사이에 낀 M·N·O·T는 수식 열이라 절대 건드리지 않는다.
+   */
   const wrote = [];
-  DOCUMENT_MANUAL_COLUMNS.forEach(function (def) {
-    if (!Object.prototype.hasOwnProperty.call(docs, def.key)) return;
-    sheet.getRange(target, def.col).setValue(docValue_(def, docs[def.key]));
-    wrote.push(def.key);
+  manualColumnRuns_().forEach(function (run) {
+    const changed = run.filter(function (def) {
+      return Object.prototype.hasOwnProperty.call(docs, def.key);
+    });
+    if (!changed.length) return;
+    const first = run[0].col;
+    const range = sheet.getRange(target, first, 1, run.length);
+    const values = range.getValues()[0];
+    changed.forEach(function (def) {
+      values[def.col - first] = docValue_(def, docs[def.key]);
+      wrote.push(def.key);
+    });
+    range.setValues([values]);
   });
   return { row: target, wrote: wrote };
+}
+
+/** 손으로 채우는 서류 열을 «붙어 있는 덩어리»로 묶는다 (F~L, P~S 같은 식) */
+function manualColumnRuns_() {
+  const sorted = DOCUMENT_MANUAL_COLUMNS.slice().sort(function (a, b) { return a.col - b.col; });
+  const runs = [];
+  sorted.forEach(function (def) {
+    const last = runs.length ? runs[runs.length - 1] : null;
+    if (last && def.col === last[last.length - 1].col + 1) last.push(def);
+    else runs.push([def]);
+  });
+  return runs;
 }
 
 function docValue_(def, raw) {
