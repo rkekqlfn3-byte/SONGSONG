@@ -28,7 +28,7 @@
  *   ?action=updateMemo&payload=...      기업 메모만 수정
  */
 
-const VERSION = '2026-07-27-status1';
+const VERSION = '2026-07-27-key1';
 
 const SPREADSHEET_ID = '1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q';
 /*
@@ -177,14 +177,93 @@ const FORMULAS = [
   }
 ];
 
+
+/* ============================================================
+   수정 열쇠 — «링크를 보낸 사람만» 고칠 수 있게 한다
+   ------------------------------------------------------------
+   열쇠는 이 파일에 적지 않는다. 이 파일은 저장소에 올라가므로
+   여기에 적으면 열쇠가 같이 공개된다.
+   대신 스크립트 속성(프로젝트 설정 > 스크립트 속성)에 넣어두고 읽어 쓴다.
+
+   처음 한 번만:
+     편집기에서 setupEditKeys 를 실행하면 사람 수만큼 열쇠를 만들어
+     저장하고, 각자에게 보낼 링크를 실행 기록에 찍어준다.
+   ============================================================ */
+const EDIT_KEYS_PROPERTY = 'EDIT_KEYS';
+/** 여기 이름만 고쳐서 setupEditKeys 를 실행하면 된다. 이름은 작업로그에 그대로 남는다 */
+const EDIT_KEY_PEOPLE = ['송상현', '김채은', '이성희', '김소희', '성남주'];
+/** 열쇠 없이도 되는 것 — 살아있는지 확인만 한다 */
+const OPEN_ACTIONS = ['ping'];
+
+/** 스크립트 속성에 저장된 { 열쇠: 이름 } */
+function editKeyMap_() {
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty(EDIT_KEYS_PROPERTY);
+    const map = raw ? JSON.parse(raw) : null;
+    return map && typeof map === 'object' ? map : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * 요청에 실려온 열쇠를 확인하고 «누구인지»를 돌려준다.
+ * 열쇠가 없거나 모르는 열쇠면 여기서 막는다.
+ */
+function requireEditor_(e, payload) {
+  const map = editKeyMap_();
+  if (!map || !Object.keys(map).length) {
+    throw new Error('수정 열쇠가 아직 설정되지 않았습니다. 시트 편집기에서 setupEditKeys 를 한 번 실행하세요.');
+  }
+  const key = cleanText_((payload && payload._key) || (e && e.parameter && e.parameter.key));
+  if (!key) throw new Error('수정 권한이 없습니다. 받으신 수정 링크로 다시 들어와 주세요.');
+  const who = map[key];
+  if (!who) throw new Error('수정 링크가 더 이상 유효하지 않습니다. 담당자에게 새 링크를 요청하세요.');
+  return who;
+}
+
+/**
+ * 열쇠를 새로 만들어 저장하고, 사람마다 보낼 링크를 실행 기록에 찍는다.
+ * 다시 실행하면 «열쇠가 전부 새로 바뀐다» — 예전 링크는 모두 못 쓰게 된다.
+ */
+function setupEditKeys() {
+  const map = {};
+  const lines = [
+    '수정 열쇠 ' + EDIT_KEY_PEOPLE.length + '개를 새로 만들었습니다.',
+    '각자에게 아래 «#k=…» 부분을 웹 주소 뒤에 붙여서 보내세요.',
+    '예) https://내주소/index.html#k=xxxxxxxx',
+    ''
+  ];
+  EDIT_KEY_PEOPLE.forEach(function (name) {
+    const key = Utilities.getUuid().replace(/-/g, '');
+    map[key] = name;
+    lines.push(name + ' : #k=' + key);
+  });
+  PropertiesService.getScriptProperties().setProperty(EDIT_KEYS_PROPERTY, JSON.stringify(map));
+  Logger.log(lines.join('\n'));
+  return lines;
+}
+
+/** 지금 설정된 사람 목록만 확인한다 (열쇠는 보여주지 않는다) */
+function showEditKeyOwners() {
+  const map = editKeyMap_();
+  const names = map ? Object.keys(map).map(function (k) { return map[k]; }) : [];
+  Logger.log(names.length ? '수정 가능한 사람: ' + names.join(', ') : '아직 설정되지 않았습니다.');
+  return names;
+}
+
 function doGet(e) {
   const action = e && e.parameter ? e.parameter.action : '';
   let payload = {};
   try {
     if (action === 'ping') return response_({ ok: true, message: 'ready', version: VERSION }, e);
-    if (action === 'diag') return response_({ ok: true, version: VERSION, sheets: diag_() }, e);
+    if (action === 'diag') {
+      requireEditor_(e, JSON.parse((e.parameter && e.parameter.payload) || '{}'));
+      return response_({ ok: true, version: VERSION, sheets: diag_() }, e);
+    }
     if (action === 'getAuditLogs') {
       const requested = JSON.parse((e.parameter && e.parameter.payload) || '{}');
+      requireEditor_(e, requested);
       const requestedLimit = requested.limit || (e.parameter && e.parameter.limit) || 100;
       const limit = String(requestedLimit).toLowerCase() === 'all'
         ? 'all'
@@ -198,6 +277,13 @@ function doGet(e) {
     }
 
     payload = JSON.parse((e.parameter && e.parameter.payload) || '{}');
+    // 살아있는지 확인(ping)을 뺀 모든 요청은 수정 열쇠가 있어야 한다
+    const editor = OPEN_ACTIONS.indexOf(action) >= 0 ? '' : requireEditor_(e, payload);
+    if (editor) {
+      // 작업자 이름은 «열쇠»가 정한다 — 각자 적어 넣은 이름으로 바꿔치기할 수 없게
+      if (!payload._audit || typeof payload._audit !== 'object') payload._audit = {};
+      payload._audit.actor = editor;
+    }
     let result;
     if (action === 'setupFormulas') {
       result = { applied: setupFormulas_() };
