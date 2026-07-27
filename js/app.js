@@ -5,16 +5,6 @@
   // 테마
   const savedTheme = localStorage.getItem(LS_KEY + ':theme');
   if (savedTheme) document.documentElement.dataset.theme = savedTheme;
-
-  /*
-   * 수정 링크(#k=…)로 들어온 사람만 화면을 연다.
-   * 열쇠가 없으면 자료를 그리지 않고 안내만 띄운다.
-   * ※ 이건 화면을 잠그는 것이다. 시트와 공개 사이트 파일 자체를 막는 것은 아니다.
-   */
-  if (!captureEditKey()) {
-    showAccessGate();
-    return;
-  }
   $('#btnTheme').onclick = () => {
     const cur = document.documentElement.dataset.theme;
     const isDark = cur ? cur === 'dark' : matchMedia('(prefers-color-scheme:dark)').matches;
@@ -259,18 +249,3 @@
   // 열 때만 불러오면 실제로 기록이 있어도 화면에는 0으로 보인다.
   refreshActivityLogsFromSheet({ silent: true }).catch(error => console.error(error));
 })();
-
-/** 수정 링크 없이 들어온 사람에게 보여줄 화면 — 자료는 그리지 않는다 */
-function showAccessGate() {
-  document.body.classList.add('locked');
-  const gate = el('div', 'access-gate');
-  gate.innerHTML = `
-    <div class="access-gate-panel">
-      <div class="eyebrow">AI TRAINING ROADMAP</div>
-      <h1>수정 링크가 필요합니다</h1>
-      <p>이 화면은 담당자에게 받은 <b>전용 링크</b>로만 열 수 있습니다.<br>
-         받으신 링크를 그대로 눌러 들어와 주세요.</p>
-      <p class="access-gate-sub">링크가 없거나 더 이상 열리지 않으면 담당자에게 새 링크를 요청하세요.</p>
-    </div>`;
-  document.body.appendChild(gate);
-}

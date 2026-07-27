@@ -151,32 +151,6 @@ function getBaseYear() {
 function setBaseYear(year) { localStorage.setItem(BASE_YEAR_KEY, String(year)); }
 /** 저장용 주소 — 설정에서 바꾸지 않았으면 배포된 기본 주소를 쓴다 */
 const writeEndpoint = () => localStorage.getItem(WRITE_ENDPOINT_KEY) || DEFAULT_WRITE_URL;
-
-/* ============================================================
-   수정 열쇠 — 링크로 받은 사람만 쓸 수 있게 한다
-   주소 뒤의 «#k=…» 를 이 브라우저에 넣어두고, 주소창에서는 바로 지운다.
-   (화면을 찍거나 주소를 복사해 줘도 열쇠가 딸려가지 않게)
-   ============================================================ */
-const EDIT_KEY_STORAGE = 'airoadmap-edit-key';
-function captureEditKey() {
-  const from = source => {
-    const m = String(source || '').match(/[#&?]k=([A-Za-z0-9_-]{8,})/);
-    return m ? m[1] : '';
-  };
-  const found = from(location.hash) || from(location.search);
-  if (found) {
-    try { localStorage.setItem(EDIT_KEY_STORAGE, found); } catch {}
-    // 주소창에서 열쇠를 지운다 (뒤로가기 기록에도 남지 않게 replace 를 쓴다)
-    try { history.replaceState(null, '', location.pathname + location.search.replace(/[?&]k=[^&]*/, '')); } catch {}
-  }
-  return editKey();
-}
-function editKey() {
-  try { return localStorage.getItem(EDIT_KEY_STORAGE) || ''; } catch { return ''; }
-}
-function clearEditKey() {
-  try { localStorage.removeItem(EDIT_KEY_STORAGE); } catch {}
-}
 /** 읽어오는 탭. headers=0으로 요청하므로 배열 인덱스 = 시트 행 번호 - 1 이 된다 */
 const GVIZ_SHEETS = [TAB_DOCS, TAB_SOURCE, TAB_COACH, TAB_MAIL];
 
@@ -463,8 +437,7 @@ function requestSheetWrite(endpoint, action, payload) {
   const clean = normalizeWriteEndpoint(endpoint);
   const callback = `__sheetWrite_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const requestId = makeRequestId(action);
-  // 수정 열쇠를 함께 보낸다 — 시트 쪽에서 이 열쇠로 «누구인지»를 정하고, 없으면 거절한다
-  const sentPayload = { ...(payload || {}), _requestId: requestId, _source: 'web', _key: editKey() };
+  const sentPayload = { ...(payload || {}), _requestId: requestId, _source: 'web' };
   const operator = String(localStorage.getItem(WEB_OPERATOR_KEY) || '').trim();
   let audit = writeAuditMeta(action, sentPayload);
   if (audit) {
