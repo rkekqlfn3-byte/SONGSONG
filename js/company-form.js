@@ -480,17 +480,36 @@ function openCompanyEditDialog(company) {
  * 서류 현황·상세창에서 «컨설팅 수행일지»를 고쳤을 때, 같은 차수의 컨설팅일도 시트에 같이 반영한다.
  * 지운 경우(dateIso가 빈 값)는 일정을 건드리지 않는다 — 서류만 지웠는데 일정까지 날아가지 않게.
  */
-async function syncConsultDateFromDoc(company, index, dateIso) {
+/** 동행 표시된 일정 중 가장 늦은 것 — 시트의 «방문(최근일자)»와 같은 기준 */
+function latestVisitOf(items) {
+  const visits = (items || []).filter(x => x && x.visit && x.date);
+  if (!visits.length) return null;
+  const last = visits.sort((a, b) => a.date - b.date)[visits.length - 1];
+  return { owner: last.owner || '', dateRaw: iso(last.date), date: last.date, time: last.time || '' };
+}
+async function syncConsultDateFromDoc(company, index, dateIso, extra) {
   if (!company || !dateIso) return false;
   const items = company.consultations || [{}, {}];
   const item = items[index - 1] || {};
   const before = item.date ? iso(item.date) : '';
-  if (before === dateIso) return false;                 // 이미 같은 날이면 보낼 필요가 없다
+  const beforeTime = to24Time(item.time);
+  const beforeOwner = item.visit ? String(item.owner || '').trim() : '';
+  // 상세창 수행일지 줄에서 같이 적은 시간·동행 담당자 (없으면 지금 값을 그대로 둔다)
+  const time = extra ? to24Time(extra.time) : beforeTime;
+  const owner = extra ? String(extra.owner || '').trim() : beforeOwner;
+  const nothingChanged = before === dateIso && time === beforeTime && owner === beforeOwner;
+  if (nothingChanged) return false;                     // 바뀐 게 없으면 보낼 필요가 없다
   const dates = [
     items[0] && items[0].date ? iso(items[0].date) : '',
     items[1] && items[1].date ? iso(items[1].date) : '',
   ];
   dates[index - 1] = dateIso;
+  const times = [to24Time(items[0] && items[0].time), to24Time(items[1] && items[1].time)];
+  const visits = [items[0] && items[0].visit ? 'O' : '', items[1] && items[1].visit ? 'O' : ''];
+  const owners = [(items[0] && items[0].owner) || '', (items[1] && items[1].owner) || ''];
+  times[index - 1] = time;
+  visits[index - 1] = owner ? 'O' : '';                 // 동행 담당자를 고르면 동행, 비우면 해제
+  owners[index - 1] = owner;
   // 1차를 고치면 컨설팅 시작·내부 종료기한(+28일)도 같이 옮기고, 2차만 고칠 때는 기존 값을 지킨다
   const firstDate = index === 1 ? isoToDate(dateIso) : (isoToDate(dates[0]) || company.start || null);
   const endDate = index === 1
@@ -519,26 +538,31 @@ async function syncConsultDateFromDoc(company, index, dateIso) {
     coachPhone: company.coachPhone || '',
     scheduleChanged: true,
     consult1Date: dates[0],
-    consult1Time: (items[0] && items[0].time) || '',
-    consult1Visit: items[0] && items[0].visit ? 'O' : '',
-    consult1Owner: (items[0] && items[0].owner) || '',
+    consult1Time: times[0],
+    consult1Visit: visits[0],
+    consult1Owner: owners[0],
     consult2Date: dates[1],
-    consult2Time: (items[1] && items[1].time) || '',
-    consult2Visit: items[1] && items[1].visit ? 'O' : '',
-    consult2Owner: (items[1] && items[1].owner) || '',
+    consult2Time: times[1],
+    consult2Visit: visits[1],
+    consult2Owner: owners[1],
     _audit: {
       type: 'EDIT',
       target: company.name,
-      detail: `${index}차 컨설팅일 ${before ? md(isoToDate(before)) : '미정'} → ${md(isoToDate(dateIso))} (수행일지 연동)`,
+      detail: `${index}차 컨설팅 ${before ? md(isoToDate(before)) : '미정'} → ` +
+        `${md(isoToDate(dateIso))}${time ? ' ' + time : ''}${owner ? ' · 동행 ' + owner : ''} (수행일지 연동)`,
       tone: 'info',
-      before: { [`consult${index}Date`]: before },
-      after: { [`consult${index}Date`]: dateIso }
+      before: { [`consult${index}Date`]: before, [`consult${index}Time`]: beforeTime, [`consult${index}Owner`]: beforeOwner },
+      after: { [`consult${index}Date`]: dateIso, [`consult${index}Time`]: time, [`consult${index}Owner`]: owner }
     }
   };
   await requestSheetWrite(writeEndpoint(), 'updateCompany', payload);
   // 화면에 들고 있는 값도 같이 맞춘다 — 다음 동기화까지 어긋나 보이지 않게
-  items[index - 1] = Object.assign({}, item, { dateRaw: dateIso, date: isoToDate(dateIso) });
+  items[index - 1] = Object.assign({}, item, {
+    dateRaw: dateIso, date: isoToDate(dateIso),
+    time, visit: !!owner, owner,
+  });
   company.consultations = items;
+  company.latestVisit = latestVisitOf(items) || company.latestVisit;
   if (index === 1) {
     company.startRaw = payload.startDate;
     company.start = firstDate;

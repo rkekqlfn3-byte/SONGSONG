@@ -339,6 +339,14 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
   background:var(--surface);color:var(--accent-ink);font-size:10.5px;font-weight:700;cursor:pointer;
 }
 .drawer-doc-save:hover{border-color:var(--accent);background:var(--wash)}
+/* 수행일지 줄 — 날짜·시간·동행 담당자를 한 줄에 놓고, 좁으면 아래로 흐른다 */
+.doc-log-control{flex-wrap:wrap;row-gap:4px}
+.doc-log-control .doc-log-time{width:56px}
+.doc-log-control .doc-log-owner{
+  min-height:29px;max-width:104px;padding:4px 6px;border-radius:7px;
+  font-size:11.5px;border:1px solid var(--border);background:var(--surface);color:var(--ink);
+}
+.chk.doc-row-edit:has(.doc-log-control){min-height:44px}
 .drawer-doc-check{display:inline-flex;align-items:center;gap:5px;cursor:pointer;color:var(--ink-2);font-size:11px}
 .drawer-doc-check input{width:15px;height:15px;margin:0;accent-color:var(--accent)}
 .drawer-doc-locked{font-size:10.5px;color:var(--ink-3);white-space:nowrap}
@@ -1301,6 +1309,8 @@ tbody tr.sel td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
   .drawer-doc-control{width:100%}
   .drawer-doc-control input[type=text]{flex:1;width:auto;min-height:40px;font-size:13px}
   .drawer-doc-save{min-width:62px;min-height:40px;font-size:11.5px}
+  .doc-log-control .doc-log-time{flex:0 0 68px;width:68px}
+  .doc-log-control .doc-log-owner{flex:1;max-width:none;min-height:40px;font-size:13px}
   .drawer-doc-check{min-height:40px;justify-content:flex-end;font-size:12px}
   .drawer-doc-check input{width:20px;height:20px}
   .doc-edit-toggle{min-width:58px;min-height:36px}

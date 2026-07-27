@@ -449,7 +449,8 @@ async function commitDocCell(td, company, def, entered, opts) {
     let scheduleSynced = false;
     if (def.linkConsult && sent) {
       try {
-        scheduleSynced = await syncConsultDateFromDoc(company, def.linkConsult, sent);
+        scheduleSynced = await syncConsultDateFromDoc(
+          company, def.linkConsult, sent, readDrawerConsultInputs(def.linkConsult, company));
         if (scheduleSynced) render();
       } catch (error) {
         console.error(error);
@@ -621,6 +622,38 @@ function refreshCoachDocRow(coach, def) {
   const check = row.querySelector('[data-coach-doc-toggle]');
   if (check) check.checked = has;
 }
+/** 동행 담당자 목록 — 기업·코치의 내부 담당자를 모은다. 비우면 «동행 없음» */
+function ownerOptions(selected) {
+  const current = String(selected || '').trim();
+  const names = uniq(state.M.companies.map(c => c.owner).concat(state.M.coaches.map(c => c.owner)));
+  if (current && !names.includes(current)) names.push(current);
+  return `<option value="">동행 없음</option>` +
+    names.map(name => `<option value="${esc(name)}"${name === current ? ' selected' : ''}>${esc(name)}</option>`).join('');
+}
+/** 보기 화면의 값 칸 — 수행일지는 날짜 뒤에 시간·동행 담당자를 같이 보여준다 */
+function docRowValueText(company, def) {
+  const base = esc(cellText(company.docs[def.k]));
+  if (!def.linkConsult) return base;
+  const item = (company.consultations || [])[def.linkConsult - 1] || {};
+  const time = to24Time(item.time);
+  const owner = item.visit ? String(item.owner || '').trim() : '';
+  return base + (time ? ` ${esc(time)}` : '') + (owner ? ` · 동행 ${esc(owner)}` : '');
+}
+/** 상세창 수행일지 줄에 적어둔 시간·동행 담당자 — 없으면 null (서류 현황 표에서 고칠 때) */
+function readDrawerConsultInputs(index, company) {
+  if (!index) return null;
+  // 다른 기업의 상세창이 열려 있을 때 그 값을 잘못 가져오지 않게 확인한다
+  if (!DRAWER.classList.contains('open')) return null;
+  if (company && state.comp.sel !== company.name) return null;
+  const time = DRAWER.querySelector(`[data-log-time="${index}"]`);
+  const owner = DRAWER.querySelector(`[data-log-owner="${index}"]`);
+  if (!time && !owner) return null;
+  return {
+    time: time ? to24Time(time.value) : '',
+    owner: owner ? owner.value.trim() : '',
+  };
+}
+
 /**
  * 상세창 «전체 저장» — 고친 칸을 모아 한 번에 보낸다.
  * 기업 서류는 한 번의 통신으로 묶어 보내고, 코치 공통 서류만 따로 보낸다.
@@ -635,8 +668,15 @@ function collectDrawerDocChanges(company) {
     const check = row.querySelector('[data-doc-toggle]');
     if (input) {
       const entered = input.value.trim();
-      if (entered === docCellText(company.docs[def.k])) return;
-      changes.push({ def, entered, input });
+      if (entered !== docCellText(company.docs[def.k])) { changes.push({ def, entered, input }); return; }
+      // 날짜는 그대로인데 시간·동행 담당자만 고친 경우 — 일정만 다시 보낸다
+      if (!def.linkConsult || !entered) return;
+      const item = (company.consultations || [])[def.linkConsult - 1] || {};
+      const now = readDrawerConsultInputs(def.linkConsult, company) || { time: '', owner: '' };
+      const sameTime = now.time === to24Time(item.time);
+      const sameOwner = now.owner === (item.visit ? String(item.owner || '').trim() : '');
+      if (sameTime && sameOwner) return;
+      changes.push({ def, entered, input, scheduleOnly: true });
     } else if (check) {
       if (check.checked === filled(company.docs[def.k])) return;
       changes.push({ def, entered: check.checked ? 'O' : '', check });
@@ -659,8 +699,9 @@ async function saveAllDrawerDocs(company) {
     }
   }
 
-  const mine = changes.filter(x => !x.def.byCoach);
+  const mine = changes.filter(x => !x.def.byCoach && !x.scheduleOnly);
   const coachChanges = changes.filter(x => x.def.byCoach);
+  const scheduleOnly = changes.filter(x => x.scheduleOnly);
   let saved = 0;
 
   if (mine.length) {
@@ -701,15 +742,20 @@ async function saveAllDrawerDocs(company) {
       toast('저장 실패 — ' + (e.message || '저장 연결을 확인하세요'));
       return false;
     }
-    // 수행일지를 고쳤으면 같은 차수의 컨설팅일도 맞춘다
-    for (const change of mine) {
-      if (!change.def.linkConsult || !docs[change.def.k]) continue;
-      try {
-        await syncConsultDateFromDoc(company, change.def.linkConsult, docs[change.def.k]);
-      } catch (error) {
-        console.error(error);
-        toast(`${change.def.label}은 저장됐지만 컨설팅일 반영은 실패했습니다 — ${error.message || '저장 연결을 확인하세요'}`);
-      }
+  }
+
+  // 수행일지 줄 — 날짜·시간·동행 담당자를 컨설팅 일정에 맞춘다
+  for (const change of mine.concat(scheduleOnly)) {
+    if (!change.def.linkConsult) continue;
+    const dateIso = docSendValue(change.def, change.entered, year);
+    if (!dateIso) continue;
+    try {
+      const moved = await syncConsultDateFromDoc(company, change.def.linkConsult, dateIso,
+        readDrawerConsultInputs(change.def.linkConsult, company));
+      if (moved && change.scheduleOnly) saved++;
+    } catch (error) {
+      console.error(error);
+      toast(`${change.def.label}은 저장됐지만 컨설팅 일정 반영은 실패했습니다 — ${error.message || '저장 연결을 확인하세요'}`);
     }
   }
 
@@ -794,6 +840,15 @@ function openCompany(c, docsEditMode) {
           control = '<span class="drawer-doc-locked">코치 미배정</span>';
         } else if (d.type === 'mark') {
           control = `<label class="drawer-doc-check"><input type="checkbox" data-doc-toggle="${esc(d.k)}"${has ? ' checked' : ''}><span>제출</span></label>`;
+        } else if (d.linkConsult) {
+          // 수행일지는 컨설팅 일정과 한 몸 — 날짜 옆에서 시간·동행 담당자까지 같이 적는다
+          const item = (c.consultations || [])[d.linkConsult - 1] || {};
+          control = `<div class="drawer-doc-control doc-log-control">
+            <input type="text" inputmode="numeric" placeholder="6/22" value="${esc(docCellText(c.docs[d.k]))}" data-doc-input="${esc(d.k)}" aria-label="${esc(d.label)} 날짜">
+            <input type="text" class="doc-log-time" list="consultTimeOptions" placeholder="10:00" maxlength="8" value="${esc(to24Time(item.time))}" data-log-time="${d.linkConsult}" aria-label="${d.linkConsult}차 컨설팅 시간">
+            <select class="doc-log-owner" data-searchable="off" data-log-owner="${d.linkConsult}" aria-label="${d.linkConsult}차 동행 담당자">${ownerOptions(item.visit ? item.owner : '')}</select>
+            <button class="drawer-doc-save" type="button" data-doc-save="${esc(d.k)}">저장</button>
+          </div>`;
         } else {
           control = `<div class="drawer-doc-control">
             <input type="text" inputmode="numeric" placeholder="6/22" value="${esc(docCellText(c.docs[d.k]))}" data-doc-input="${esc(d.k)}">
@@ -805,7 +860,7 @@ function openCompany(c, docsEditMode) {
       }
       return `<div class="chk ${has ? 'ok' : 'no'}" data-doc-row="${esc(d.k)}"><div class="mk">${has ? '●' : '○'}</div>` +
         `<div class="lb">${esc(d.label)}${note}</div>` +
-        `<div class="vl">${has ? esc(cellText(c.docs[d.k])) : '미제출'}</div></div>`;
+        `<div class="vl">${has ? docRowValueText(c, d) : '미제출'}</div></div>`;
     }).join('');
     const n = DOC_DEFS.filter(d => d.stage === st && filled(c.docs[d.k])).length;
     const tot = DOC_DEFS.filter(d => d.stage === st).length;
@@ -936,6 +991,18 @@ function openCompany(c, docsEditMode) {
           input.select();
         };
         btn.onclick = save;
+        // 수행일지 줄 — 저장된 동행 담당자를 고른 상태로 맞춘다
+        const ownerBox = btn.parentElement.querySelector('[data-log-owner]');
+        if (ownerBox) {
+          const item = (c.consultations || [])[Number(ownerBox.dataset.logOwner) - 1] || {};
+          ownerBox.value = item.visit ? String(item.owner || '').trim() : '';
+        }
+        // 시간 칸 — 10 · 오후 3 처럼 적어도 10:00 · 15:00 으로 맞춰준다
+        const timeBox = btn.parentElement.querySelector('[data-log-time]');
+        if (timeBox) {
+          timeBox.onblur = () => { const fixed = to24Time(timeBox.value); if (fixed) timeBox.value = fixed; };
+          timeBox.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); timeBox.blur(); save(); } };
+        }
         input.oninput = () => input.classList.remove('bad');
         input.onkeydown = e => {
           if (e.key === 'Enter') { e.preventDefault(); save(); }
