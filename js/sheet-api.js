@@ -293,9 +293,24 @@ async function loadSourceHeaderRow(spreadsheetId, name) {
    먼저 성공한 쪽을 기억해 다음부터는 그 길로 바로 간다.
    ============================================================ */
 const READ_PATH_KEY = LS_KEY + ':readPath';
-const readPath = () => localStorage.getItem(READ_PATH_KEY) || '';
+/*
+ * 스크립트 경유를 «항상 먼저» 시도한다.
+ * 다만 방금 실패했다면 그 뒤 10분 동안은 건너뛰어 헛걸음을 줄인다.
+ * (예전에는 한 번 실패하면 영영 예전 길만 써서, 스크립트를 새로 배포해도 바뀌지 않았다)
+ */
+const READ_FALLBACK_TTL = 10 * 60 * 1000;
+function readPath() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(READ_PATH_KEY) || 'null');
+    if (!saved || saved.name !== 'gviz') return '';
+    return (Date.now() - (saved.at || 0) > READ_FALLBACK_TTL) ? '' : 'gviz';
+  } catch { return ''; }        // 예전 형식이 저장돼 있어도 그냥 스크립트부터 다시 해본다
+}
 function rememberReadPath(path) {
-  try { localStorage.setItem(READ_PATH_KEY, path); } catch {}
+  try {
+    if (path === 'gviz') localStorage.setItem(READ_PATH_KEY, JSON.stringify({ name: 'gviz', at: Date.now() }));
+    else localStorage.removeItem(READ_PATH_KEY);
+  } catch {}
 }
 let lastReadPathLabel = '';
 
