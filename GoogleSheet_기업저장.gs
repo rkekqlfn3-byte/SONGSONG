@@ -29,7 +29,8 @@
  *   ?action=syncStatuses&payload=...   1차 컨설팅일 기준 진행현황 자동 갱신
  */
 
-const VERSION = '2026-07-27-consult1';
+const VERSION = '2026-07-27-consult2';
+const API_CAPABILITIES = ['syncStatuses'];
 
 const SPREADSHEET_ID = '1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q';
 /*
@@ -183,7 +184,7 @@ function doGet(e) {
   let payload = {};
   let skipDefaultAudit = false;
   try {
-    if (action === 'ping') return response_({ ok: true, message: 'ready', version: VERSION }, e);
+    if (action === 'ping') return response_({ ok: true, message: 'ready', version: VERSION, capabilities: API_CAPABILITIES }, e);
     if (action === 'diag') return response_({ ok: true, version: VERSION, sheets: diag_() }, e);
     if (action === 'getAuditLogs') {
       const requested = JSON.parse((e.parameter && e.parameter.payload) || '{}');

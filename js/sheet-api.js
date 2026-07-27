@@ -331,6 +331,19 @@ function setSyncBusy(busy) {
   $('#syncSave').disabled = busy;
 }
 let syncInFlightPromise = null;
+let automaticStatusSupport = null;
+
+/** 예전 Apps Script에는 없는 요청을 보내 실패 로그가 쌓이지 않도록 지원 여부를 먼저 확인한다. */
+async function supportsAutomaticStatusSync() {
+  if (automaticStatusSupport != null) return automaticStatusSupport;
+  try {
+    const response = await requestSheetWrite(writeEndpoint(), 'ping', {});
+    automaticStatusSupport = Array.isArray(response.capabilities) && response.capabilities.includes('syncStatuses');
+  } catch (error) {
+    automaticStatusSupport = false;
+  }
+  return automaticStatusSupport;
+}
 
 function syncBlockedByEditing() {
   const documentCellOpen = typeof docEditing !== 'undefined' && !!docEditing;
@@ -375,7 +388,7 @@ async function syncFromSheetOnce(endpoint, opts) {
     if (!opts.testOnly) {
       const checkedToday = localStorage.getItem(AUTO_STATUS_CHECK_KEY) === iso(TODAY);
       const shouldCheck = opts.reason !== 'automatic' || !checkedToday;
-      if (shouldCheck) {
+      if (shouldCheck && await supportsAutomaticStatusSync()) {
         try {
           automaticStatus = await requestSheetWrite(writeEndpoint(), 'syncStatuses', {});
           localStorage.setItem(AUTO_STATUS_CHECK_KEY, iso(TODAY));
