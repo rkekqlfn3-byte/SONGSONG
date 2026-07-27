@@ -315,6 +315,10 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
   border-radius:7px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;
 }
 .doc-edit-toggle:hover{border-color:var(--accent);background:var(--wash)}
+/* 상세창 «전체 저장» — 고친 칸을 한 번에 보낸다 */
+.doc-edit-toggle.save-all{border-color:var(--accent);background:var(--accent);color:#fff}
+.doc-edit-toggle.save-all:hover{filter:brightness(1.08)}
+.doc-edit-toggle.save-all[disabled]{opacity:.6;cursor:default}
 .chk{display:grid;grid-template-columns:16px 1fr auto;gap:9px;align-items:center;padding:5px 6px;border-radius:6px;font-size:12.5px}
 .chk:hover{background:var(--wash)}
 .chk .mk{font-size:13px;line-height:1;text-align:center}

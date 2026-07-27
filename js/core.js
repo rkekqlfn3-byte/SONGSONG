@@ -385,8 +385,11 @@ const DOC_DEFS = [
 const byDocKey = k => DOC_DEFS.find(d => d.k === k);
 /** 기업 추가·기본정보 수정 폼에서는 코치 공통 서류를 읽기 전용으로 보여준다 */
 const docLocked = d => !!d.byCoach;
-/** 서류 현황·상세창에서는 코치 공통 서류도 수정할 수 있고, 자동 계산 열만 잠근다 */
-const docEditable = d => d.type !== 'auto';
+/**
+ * 서류 현황·상세창에서는 모든 서류를 고칠 수 있다.
+ * 약정 종료일은 시작일 +28일로 «자동으로 채워지지만», 다르게 적어야 할 때는 직접 고칠 수 있다.
+ */
+const docEditable = () => true;
 const STAGES = ['신청', '확정', '실시', '지급'];
 
 /** 진행현황 — 순서 = 파이프라인 진행 방향. term=종료(비활성) 상태 */

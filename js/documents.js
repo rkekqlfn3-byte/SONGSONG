@@ -217,7 +217,7 @@ function docCellHtml(company, def) {
 }
 function docCellTip(company, def) {
   const shown = filled(company.docs[def.k]) ? docCellText(company.docs[def.k]) : '미제출';
-  if (!docEditable(def)) return `${company.name} — ${def.label}\n${shown}\n약정 시작일 +28일 자동 계산`;
+  if (def.type === 'auto') return `${company.name} — ${def.label}\n${shown}\n약정 시작일 +28일로 자동 계산 · 직접 고칠 수 있습니다`;
   return `${company.name} — ${def.label}\n${shown}\n` +
     (def.byCoach ? `코치 ${company.coachName || '미배정'} 공통 · 담당 기업 전체에 반영됩니다\n` : '') +
     `눌러서 ${def.type === 'mark' ? '제출 표시를 켜고 끕니다' : '월/일을 입력합니다'}`;
@@ -571,6 +571,8 @@ function refreshDrawerDocRow(company, def) {
   if (input) { input.value = docCellText(raw); input.classList.remove('bad'); }
   const check = row.querySelector('[data-doc-toggle]');
   if (check) check.checked = has;
+  // 약정 시작일을 저장하면 종료일(+28일)도 함께 바뀌므로 그 줄도 같이 맞춘다
+  if (def.k === 'teamStart') refreshDrawerDocRow(company, byDocKey('teamEnd'));
   refreshDrawerDocCounts(company);
 }
 /** 단계별 개수와 «서류 7/15» 표시를 지금 값으로 맞춘다 */
@@ -619,6 +621,112 @@ function refreshCoachDocRow(coach, def) {
   const check = row.querySelector('[data-coach-doc-toggle]');
   if (check) check.checked = has;
 }
+/**
+ * 상세창 «전체 저장» — 고친 칸을 모아 한 번에 보낸다.
+ * 기업 서류는 한 번의 통신으로 묶어 보내고, 코치 공통 서류만 따로 보낸다.
+ * 형식이 틀린 칸이 하나라도 있으면 아무것도 보내지 않는다.
+ */
+function collectDrawerDocChanges(company) {
+  const changes = [];
+  DRAWER.querySelectorAll('[data-doc-row]').forEach(row => {
+    const def = byDocKey(row.dataset.docRow);
+    if (!def || !docEditable(def)) return;
+    const input = row.querySelector('[data-doc-input]');
+    const check = row.querySelector('[data-doc-toggle]');
+    if (input) {
+      const entered = input.value.trim();
+      if (entered === docCellText(company.docs[def.k])) return;
+      changes.push({ def, entered, input });
+    } else if (check) {
+      if (check.checked === filled(company.docs[def.k])) return;
+      changes.push({ def, entered: check.checked ? 'O' : '', check });
+    }
+  });
+  return changes;
+}
+async function saveAllDrawerDocs(company) {
+  const year = getBaseYear();
+  const changes = collectDrawerDocChanges(company);
+  if (!changes.length) { toast('바뀐 칸이 없습니다'); return false; }
+
+  for (const change of changes) {                 // 형식 검사가 먼저 — 하나라도 틀리면 중단
+    if (change.def.type === 'mark') continue;
+    if (change.entered && !monthDayToDate(change.entered, year)) {
+      change.input.classList.add('bad');
+      change.input.focus();
+      toast(`${change.def.label} — 6/22 처럼 월/일로 적어주세요`);
+      return false;
+    }
+  }
+
+  const mine = changes.filter(x => !x.def.byCoach);
+  const coachChanges = changes.filter(x => x.def.byCoach);
+  let saved = 0;
+
+  if (mine.length) {
+    const docs = {};
+    mine.forEach(x => { docs[x.def.k] = docSendValue(x.def, x.entered, year); });
+    // 약정 시작일을 고치면 종료일(+28일)도 같이 — 단, 종료일을 직접 적었으면 그 값을 지킨다
+    if (docs.teamStart !== undefined && docs.teamEnd === undefined) {
+      const start = isoToDate(docs.teamStart);
+      docs.teamEnd = start ? iso(addDays(start, 28)) : '';
+    }
+    const keys = Object.keys(docs);
+    const rollback = {};
+    keys.forEach(k => { rollback[k] = company.docs[k]; });
+    keys.forEach(k => { company.docs[k] = localDocValue(k, docs[k]); });
+    company.docCount = DOC_DEFS.filter(d => filled(company.docs[d.k])).length;
+    repaintDocCells([company.name], keys);
+    try {
+      await requestSheetWrite(writeEndpoint(), 'updateDocs', {
+        companyName: company.name,
+        docs,
+        _audit: {
+          type: 'DOC',
+          target: company.name,
+          detail: `서류 ${mine.length}칸 한 번에 저장 — ` +
+            mine.map(x => `${x.def.label}: ${x.entered || '지움'}`).join(', '),
+          tone: 'info',
+          before: rollback,
+          after: docs
+        }
+      });
+      saved += mine.length;
+    } catch (e) {
+      console.error(e);
+      keys.forEach(k => { company.docs[k] = rollback[k]; });
+      company.docCount = DOC_DEFS.filter(d => filled(company.docs[d.k])).length;
+      repaintDocCells([company.name], keys);
+      mine.forEach(x => { if (x.input) x.input.classList.add('bad'); });
+      toast('저장 실패 — ' + (e.message || '저장 연결을 확인하세요'));
+      return false;
+    }
+    // 수행일지를 고쳤으면 같은 차수의 컨설팅일도 맞춘다
+    for (const change of mine) {
+      if (!change.def.linkConsult || !docs[change.def.k]) continue;
+      try {
+        await syncConsultDateFromDoc(company, change.def.linkConsult, docs[change.def.k]);
+      } catch (error) {
+        console.error(error);
+        toast(`${change.def.label}은 저장됐지만 컨설팅일 반영은 실패했습니다 — ${error.message || '저장 연결을 확인하세요'}`);
+      }
+    }
+  }
+
+  for (const change of coachChanges) {            // 코치 공통값은 한 건씩 (담당 기업 전체에 반영)
+    const ok = await saveCoachDoc(company.coach, change.def, change.entered);
+    if (ok) saved++;
+    else if (change.input) change.input.classList.add('bad');
+  }
+
+  changes.forEach(change => refreshDrawerDocRow(company, change.def));
+  refreshDrawerDocCounts(company);
+  refreshDrawerConsultLines(company);
+  render();
+  toast(saved ? `${saved}칸 저장됨` : '저장된 칸이 없습니다');
+  return saved > 0;
+}
+
 /** 저장 단추를 잠깐 «저장됨»으로 바꿔 알려준다 */
 function flashSaveButton(btn) {
   btn.textContent = '저장됨';
@@ -679,12 +787,11 @@ function openCompany(c, docsEditMode) {
   const chk = STAGES.map(st => {
     const items = DOC_DEFS.filter(d => d.stage === st).map(d => {
       const has = filled(c.docs[d.k]);
+      const note = d.byCoach ? '<em>코치 공통</em>' : d.type === 'auto' ? '<em>+28일 자동</em>' : '';
       if (docsEditMode) {
         let control;
         if (d.byCoach && !c.coach) {
           control = '<span class="drawer-doc-locked">코치 미배정</span>';
-        } else if (!docEditable(d)) {
-          control = '<span class="drawer-doc-locked">자동 계산</span>';
         } else if (d.type === 'mark') {
           control = `<label class="drawer-doc-check"><input type="checkbox" data-doc-toggle="${esc(d.k)}"${has ? ' checked' : ''}><span>제출</span></label>`;
         } else {
@@ -694,10 +801,10 @@ function openCompany(c, docsEditMode) {
           </div>`;
         }
         return `<div class="chk doc-row-edit ${has ? 'ok' : 'no'}" data-doc-row="${esc(d.k)}"><div class="mk">${has ? '●' : '○'}</div>` +
-          `<div class="lb">${esc(d.label)}${d.byCoach ? '<em>코치 공통</em>' : ''}</div>${control}</div>`;
+          `<div class="lb">${esc(d.label)}${note}</div>${control}</div>`;
       }
       return `<div class="chk ${has ? 'ok' : 'no'}" data-doc-row="${esc(d.k)}"><div class="mk">${has ? '●' : '○'}</div>` +
-        `<div class="lb">${esc(d.label)}${d.byCoach ? '<em>코치 공통</em>' : ''}</div>` +
+        `<div class="lb">${esc(d.label)}${note}</div>` +
         `<div class="vl">${has ? esc(cellText(c.docs[d.k])) : '미제출'}</div></div>`;
     }).join('');
     const n = DOC_DEFS.filter(d => d.stage === st && filled(c.docs[d.k])).length;
@@ -761,6 +868,7 @@ function openCompany(c, docsEditMode) {
     </dl></div>
     <div class="sect">
       <div class="sect-head"><h4 data-doc-total>서류 ${c.docCount}/${DOC_DEFS.length}</h4>
+        ${docsEditMode ? '<button class="doc-edit-toggle save-all" type="button" id="saveAllDocs">전체 저장</button>' : ''}
         <button class="doc-edit-toggle" type="button" id="editDocs">${docsEditMode ? '완료' : '수정'}</button>
       </div>
       <div class="coach-doc-note">서식8·9·10·통장 사본은 배정 코치의 공통값이며, 수정하면 같은 코치의 모든 기업에 반영됩니다.</div>
@@ -773,6 +881,16 @@ function openCompany(c, docsEditMode) {
       requestAnimationFrame(() => $('#editDocs', DRAWER)?.focus());
     };
     if (docsEditMode) {
+      const saveAll = $('#saveAllDocs', d);
+      saveAll.onclick = async () => {
+        saveAll.disabled = true;
+        saveAll.textContent = '저장 중';
+        try { await saveAllDrawerDocs(c); }
+        finally {
+          const live = $('#saveAllDocs', DRAWER);
+          if (live) { live.disabled = false; live.textContent = '전체 저장'; live.focus(); }
+        }
+      };
       d.querySelectorAll('[data-doc-toggle]').forEach(box => {
         box.onchange = async e => {
           const check = e.currentTarget;

@@ -312,7 +312,7 @@ function buildCompanyDocFields() {
 }
 function docFieldHtml(d) {
   const id = docFieldId(d);
-  const locked = docLocked(d) || d.type === 'auto';
+  const locked = docLocked(d);      // 코치 공통 서류만 잠근다 (약정 종료일은 자동으로 채우되 고칠 수 있다)
   if (d.type === 'mark' && !locked) {
     return `<div class="company-field check">
       <input type="checkbox" id="${id}">
@@ -320,7 +320,7 @@ function docFieldHtml(d) {
     </div>`;
   }
   const note = d.byCoach ? '코치 공통 · 서류현황에서 수정'
-    : d.type === 'auto' ? '시작일 +28일 자동'
+    : d.type === 'auto' ? '시작일 +28일 자동 · 고칠 수 있음'
     : d.type === 'range' ? '월/일 ~ 12/31'
     : d.linkConsult ? `${d.linkConsult}차 컨설팅일과 연동`
     : '월/일';
@@ -332,7 +332,11 @@ function docFieldHtml(d) {
   </div>`;
 }
 
-/** 약정 종료일 = 약정 시작일 + 28일. 사람이 고칠 수 없는 계산값이라 dataset에 실제 날짜를 남긴다 */
+/**
+ * 약정 종료일 = 약정 시작일 + 28일.
+ * 시작일을 고치면 자동으로 다시 채우고, 그 뒤에 종료일을 직접 고치면 적은 값이 저장된다.
+ * 종료일만 지운 상태에서는 시작일을 건드리기 전까지 그대로 비어 있다.
+ */
 function syncTeamEnd() {
   const year = getBaseYear();
   const start = monthDayToDate(docInput('teamStart').value, year);
@@ -784,7 +788,7 @@ function collectDocValues() {
  */
 function validateDocDates(year) {
   for (const d of DOC_DEFS) {
-    if (d.type !== 'date' && d.type !== 'range') continue;
+    if (d.type !== 'date' && d.type !== 'range' && d.type !== 'auto') continue;
     if (d.byCoach) continue;
     const box = docInput(d.k);
     if (box.value.trim() && !monthDayToDate(box.value, year)) {
