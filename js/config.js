@@ -3,4 +3,4 @@
    다른 스크립트가 사용하는 저장소 키는 가장 먼저 선언한다.
    ============================================================ */
 const APP_STORAGE_KEY = 'airoadmap-dashboard-v1';
-const APP_ASSET_VERSION = '20260727-read3';
+const APP_ASSET_VERSION = '20260727-search1';

@@ -1015,7 +1015,9 @@ async function saveCompany() {
      */
     syncFromSheet(localStorage.getItem(SHEET_ENDPOINT_KEY) || DEFAULT_SHEET_URL, { silent: true, reason: 'after-write' })
       .then(synced => {
-        if (synced) go('comp', { q: companyName, status: '', owner: '', coach: '' });
+        if (synced) {
+          if (!wasEditing) go('comp', { q: companyName, status: '', owner: '', coach: '' });
+        }
         // 상세창을 열어둔 채 저장하면 동기화가 «일부러» 미뤄진다 — 실패가 아니므로 알리지 않는다
         else if (!(typeof syncBlockedByEditing === 'function' && syncBlockedByEditing())) {
           toast('목록 새로고침이 미뤄졌습니다 — 동기화 버튼을 눌러주세요.');
