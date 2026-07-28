@@ -11,19 +11,15 @@
 const MAIL_STAGES = ['신청단계', '확정단계', '실시단계', '지급단계'];
 const MAIL_TARGETS = ['기업 담당자', '훈련코치'];
 
-/** 메일DB의 «일정 출처» 규칙을 그대로 계산 */
-function resolveSchedule(tpl, c, manual) {
-  const src = tpl.schedSrc || '';
-  const startDoc = c ? toDate(c.docs.teamStart) : null;      // 서류!K 시작 날짜
-  if (src === '없음' || !src) return { date: null, none: true };
-  if (src === '직접 입력') {
-    const d = manual ? new Date(manual + 'T00:00:00') : null;
-    return d && !isNaN(d) ? { date: d, manual: true } : { date: null, needManual: true };
-  }
-  if (src === '서류 시작일') return startDoc ? { date: startDoc } : { date: null, missing: '서류 탭의 «약정 시작일»' };
-  if (src === '시작일+28일') return startDoc ? { date: addDays(startDoc, 28) } : { date: null, missing: '서류 탭의 «약정 시작일»' };
-  if (src === '오늘+3일') return { date: addDays(TODAY, 3) };
-  return { date: null, missing: src };
+/**
+ * 날짜는 규칙으로 계산하지 않고 사람이 직접 고른다.
+ * 「시작일+28일」 같은 규칙을 두면 예외가 생길 때마다 손댈 수 없어서,
+ * 메일마다 달력에서 고르는 쪽이 실제 운영에 맞는다.
+ */
+function pickedDate(value) {
+  if (!value) return null;
+  const d = new Date(value + 'T00:00:00');
+  return isNaN(d.getTime()) ? null : d;
 }
 
 /** 제목·본문에 그 자리가 쓰였는지 */
@@ -96,27 +92,22 @@ function viewMail() {
     left.appendChild(f3);
   }
 
-  /* --- 제출 기한 (템플릿이 쓸 때만 나온다) --- */
+  /* --- 날짜 (본문에서 쓰는 것만 칸이 생긴다) --- */
   const needDeadline = mailUses(tpl, '기한');
-  if (needDeadline) {
+  const needSchedule = mailUses(tpl, '일정');
+  const dateField = (label, hint, value, on) => {
     const f = el('div', 'field');
-    f.innerHTML = '<label>제출 기한 <span class="dim">본문의 «기한» 자리에 들어갑니다</span></label>';
-    const di = el('input'); di.type = 'date'; di.value = s.deadline;
-    di.onchange = () => { s.deadline = di.value; render(); };
+    f.innerHTML = `<label>${esc(label)} <span class="dim">${esc(hint)}</span></label>`;
+    const di = el('input'); di.type = 'date'; di.value = value || '';
+    di.onchange = () => { on(di.value); render(); };
     f.appendChild(di);
     left.appendChild(f);
-  }
+  };
+  if (needDeadline) dateField('제출 기한', '본문의 «기한» 자리', s.deadline, v => { s.deadline = v; });
+  if (needSchedule) dateField(tpl.schedName || '일정', '본문의 «일정» 자리', s.manual, v => { s.manual = v; });
 
-  const schedBase = toCoach ? (picked[0] || null) : c;
-  const sched = tpl ? resolveSchedule(tpl, schedBase, s.manual) : null;
-  if (tpl && tpl.schedSrc === '직접 입력' && mailUses(tpl, '일정')) {
-    const f = el('div', 'field');
-    f.innerHTML = `<label>${esc(tpl.schedName || '일정')} — 직접 입력</label>`;
-    const di = el('input'); di.type = 'date'; di.value = s.manual;
-    di.onchange = () => { s.manual = di.value; render(); };
-    f.appendChild(di);
-    left.appendChild(f);
-  }
+  const deadlineDate = pickedDate(s.deadline);
+  const scheduleDate = pickedDate(s.manual);
 
   /* --- 조건 요약 --- */
   const info = el('div', 'field');
@@ -125,14 +116,13 @@ function viewMail() {
       '이 조합은 메일을 보내지 않습니다.<br>' +
       '<span class="dim">보내야 한다면 시트 «메일DB» 탭에 줄을 추가하세요.</span></div>';
   } else {
-    const bits = [`<b>발송 시점</b> ${esc(tpl.sendWhen)}`];
-    if (sched && !sched.none && mailUses(tpl, '일정')) {
-      bits.push(`<b>${esc(tpl.schedName)}</b> ` + (sched.date ? korDate(sched.date)
-        : sched.needManual ? '<span style="color:var(--critical)">날짜를 입력하세요</span>'
-        : `<span style="color:var(--critical)">${esc(sched.missing)} 값이 비어 있습니다</span>`));
-      bits.push(`<span class="dim">산출 규칙: ${esc(tpl.schedSrc)}</span>`);
-    }
-    info.innerHTML = `<div class="note">${bits.join('<br>')}</div>`;
+    const bits = [];
+    if (tpl.sendWhen) bits.push(`<b>발송 시점</b> ${esc(tpl.sendWhen)}`);
+    if (needDeadline) bits.push(`<b>제출 기한</b> ` + (deadlineDate ? korDate(deadlineDate)
+      : '<span style="color:var(--critical)">날짜를 골라주세요</span>'));
+    if (needSchedule) bits.push(`<b>${esc(tpl.schedName || '일정')}</b> ` + (scheduleDate ? korDate(scheduleDate)
+      : '<span style="color:var(--critical)">날짜를 골라주세요</span>'));
+    info.innerHTML = `<div class="note">${bits.join('<br>') || '<span class="dim">고를 것이 없습니다.</span>'}</div>`;
   }
   left.appendChild(info);
 
@@ -149,9 +139,8 @@ function viewMail() {
   } else {
     const to = toCoach ? (coach.email || (picked[0] && picked[0].coachEmail) || '') : c.contact.email;
     const toName = toCoach ? coach.name : c.contact.name;
-    const schedText = sched && sched.date ? korDate(sched.date) : '';
-    const deadlineDate = s.deadline ? new Date(s.deadline + 'T00:00:00') : null;
-    const deadlineText = deadlineDate && !isNaN(deadlineDate) ? korDate(deadlineDate) : '';
+    const schedText = scheduleDate ? korDate(scheduleDate) : '';
+    const deadlineText = deadlineDate ? korDate(deadlineDate) : '';
     const names = picked.map(x => x.name);
 
     const fill = t => String(t || '')
@@ -167,7 +156,7 @@ function viewMail() {
     const problems = [];
     if (!to) problems.push(`${toCoach ? '코치' : '기업 담당자'}의 이메일 주소가 비어 있습니다.`);
     if (needDeadline && !deadlineText) problems.push('제출 기한을 골라주세요.');
-    if (sched && !sched.none && mailUses(tpl, '일정') && !sched.date) problems.push(`${tpl.schedName}을(를) 확정하지 못했습니다.`);
+    if (needSchedule && !schedText) problems.push(`${tpl.schedName || '일정'} 날짜를 골라주세요.`);
 
     const out = card('메일 내용', `${tpl.stage} · ${tpl.target}${toCoach ? ` · 기업 ${names.length}곳` : ''}`);
     const block = (label, value, cls, id) => `
