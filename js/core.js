@@ -605,7 +605,8 @@ const state = {
   sched: { q: '', when: 'up', visitOnly: false, owner: '' },
   coach: { q: '', missing: '', sort: 'name', dir: 1, sel: null, reveal: false },
   docs:  { q: '', stage: '', missingOnly: false },
-  mail:  { stage: '신청단계', target: '기업 담당자', company: '', manual: '' },
+  // 메일 — 코치에게 보낼 때는 기업이 아니라 «코치 + 그 코치의 기업 여러 곳»을 고른다
+  mail:  { stage: '확정단계', target: '기업 담당자', company: '', coach: '', manual: '', deadline: '', drop: {} },
 };
 
 const VIEW = $('#view');

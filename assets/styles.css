@@ -1650,3 +1650,14 @@ tbody tr.sel td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
 .account-state{min-height:16px;margin:8px 0 6px;font-size:11.5px;color:var(--ink-3)}
 .account-state.bad{color:var(--critical);font-weight:650}
 .account-state.ok{color:var(--good);font-weight:650}
+
+/* 메일 — 코치에게 보낼 때 대상 기업 고르기 */
+.mail-picklist{
+  display:flex;flex-direction:column;gap:2px;max-height:230px;overflow:auto;
+  padding:6px;border:1px solid var(--border);border-radius:10px;background:var(--raised);
+}
+.mail-pick{display:flex;align-items:center;gap:8px;padding:5px 7px;border-radius:7px;cursor:pointer}
+.mail-pick:hover{background:var(--wash)}
+.mail-pick input{margin:0;flex:none;cursor:pointer}
+.mail-pick span{font-size:12.5px;color:var(--ink-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mail-pick em{margin-left:6px;font-style:normal;font-size:11px;color:var(--ink-3)}
