@@ -628,7 +628,10 @@ function requestSheetWriteOnce(endpoint, action, payload) {
   let audit = writeAuditMeta(action, sentPayload);
   if (audit) {
     // 호출부가 _audit를 따로 만들지 않은 일반 저장도 실제 작업자 이름이 시트 로그까지 전달돼야 한다.
-    sentPayload._audit = { ...audit, actor: audit.actor || operator || '웹 사용자' };
+    // 이름을 안 적었으면 비워서 보낸다.
+    // 시트 쪽이 로그인한 계정 이름으로 채우므로, 여기서 «웹 사용자»를 넣으면
+    // 기록이 「김채은(웹 사용자)」 처럼 지저분해진다
+    sentPayload._audit = { ...audit, actor: audit.actor || operator || '' };
     audit = sentPayload._audit;
   }
   const url = new URL(clean);
