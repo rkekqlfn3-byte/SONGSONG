@@ -1414,3 +1414,177 @@ tbody tr.sel td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
 }
 .data-placeholder.bad .data-placeholder-mark{ background:rgba(200,60,60,.12); color:var(--critical); }
 .data-placeholder p{ margin:0; font-size:13.5px; line-height:1.7; max-width:420px; }
+
+/* ============================================================
+   「내 담당만」 스위치 · 「지금 막힌 곳」 · 「다음 할 일」
+   ============================================================ */
+
+/* 범위 스위치 — 대시보드(어두운 배경)와 도구줄(밝은 배경) 둘 다에서 쓴다 */
+.mine-toggle{
+  display:inline-flex;align-items:center;gap:7px;flex:none;
+  min-height:32px;padding:5px 11px;border-radius:9px;cursor:pointer;
+  border:1px solid var(--border);background:var(--surface);
+  color:var(--ink-2);font-size:12.5px;font-weight:600;white-space:nowrap;
+}
+.mine-toggle input{margin:0;cursor:pointer}
+.mine-toggle b{color:var(--ink-1);font-weight:750}
+.mine-toggle.is-on{
+  border-color:color-mix(in srgb,var(--accent) 45%,transparent);
+  background:var(--wash);color:var(--accent-ink);
+}
+.mine-toggle.is-on b{color:var(--accent-ink)}
+.mine-toggle.is-disabled{cursor:default;color:var(--ink-3);font-weight:500}
+.dash-intro .mine-toggle{
+  position:relative;z-index:1;margin-top:11px;
+  border-color:rgba(255,255,255,.22);background:rgba(255,255,255,.1);color:rgba(255,255,255,.86);
+}
+.dash-intro .mine-toggle b{color:#fff}
+.dash-intro .mine-toggle.is-on{
+  border-color:rgba(159,192,255,.6);background:rgba(159,192,255,.22);color:#fff;
+}
+.dash-intro .mine-toggle.is-on b{color:#fff}
+.dash-intro .mine-toggle.is-disabled{color:rgba(255,255,255,.6)}
+
+/* 지금 막힌 곳 */
+.block-list{display:flex;flex-direction:column;gap:6px}
+.block-row{border:1px solid var(--border);border-radius:11px;background:var(--raised);overflow:hidden}
+.block-row.is-open{border-color:color-mix(in srgb,var(--accent) 38%,transparent);background:var(--surface)}
+.block-head{
+  width:100%;display:grid;align-items:center;gap:10px;
+  grid-template-columns:52px minmax(0,1fr) 110px 56px 16px;
+  padding:10px 13px;border:0;background:none;cursor:pointer;text-align:left;color:inherit;font:inherit;
+}
+.block-head:hover{background:var(--wash)}
+.block-stage{
+  justify-self:start;padding:2px 7px;border-radius:6px;
+  background:var(--grid);color:var(--ink-3);font-size:10.5px;font-weight:750;
+}
+.block-name{font-size:13px;font-weight:650;color:var(--ink-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.block-bar{display:block;height:7px;border-radius:4px;background:var(--grid);overflow:hidden}
+.block-bar i{display:block;height:100%;border-radius:4px;background:var(--accent-2)}
+.block-count{justify-self:end;font-size:13px;font-weight:750;color:var(--accent-ink);font-variant-numeric:tabular-nums}
+.block-caret{color:var(--ink-3);font-size:11px;transition:transform .15s ease}
+.block-row.is-open .block-caret{transform:rotate(180deg)}
+.block-body{padding:2px 13px 13px;border-top:1px solid var(--border)}
+.block-actor{margin-top:11px}
+.block-actor-name{margin-bottom:6px;font-size:12px;font-weight:700;color:var(--ink-2)}
+.block-chips{display:flex;flex-wrap:wrap;gap:6px}
+.block-chip{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:5px 10px;border:1px solid var(--border);border-radius:8px;
+  background:var(--surface);color:var(--ink-1);font:inherit;font-size:12px;font-weight:600;cursor:pointer;
+}
+.block-chip:hover{border-color:var(--accent);color:var(--accent-ink)}
+.block-chip em{font-style:normal;font-size:11px;font-weight:700;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.block-chip.is-soon em{color:var(--warning)}
+.block-chip.is-over{border-color:color-mix(in srgb,var(--critical) 35%,transparent)}
+.block-chip.is-over em{color:var(--critical)}
+.block-jump{
+  margin-top:13px;padding:0;border:0;background:none;cursor:pointer;
+  color:var(--accent);font:inherit;font-size:12px;font-weight:700;
+}
+.block-jump:hover{text-decoration:underline}
+
+/* 기업 표 «다음 할 일» 칸 */
+.next-doc{display:flex;flex-direction:column;gap:1px;line-height:1.4}
+.next-doc b{font-size:12px;font-weight:650;color:var(--ink-1)}
+.next-doc em{font-style:normal;font-size:11px;color:var(--ink-3)}
+
+/* 상세창 «다음 할 일» */
+.next-box{
+  padding:13px 15px;border-radius:12px;
+  border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);background:var(--wash);
+}
+.next-box.is-done{
+  border-color:color-mix(in srgb,var(--good) 32%,transparent);
+  background:color-mix(in srgb,var(--good) 9%,transparent);
+}
+.next-doc-name{font-size:14.5px;font-weight:750;color:var(--ink-1);letter-spacing:-.01em}
+.next-doc-meta{
+  display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;
+  margin-top:7px;font-size:12px;color:var(--ink-2);
+}
+.next-doc-meta b{color:var(--ink-1);font-weight:700}
+.next-stage{padding:2px 7px;border-radius:6px;background:var(--surface);font-size:10.5px;font-weight:750;color:var(--ink-3)}
+.next-doc-meta .next-soon{color:var(--warning);font-weight:750}
+.next-doc-meta .next-over{color:var(--critical);font-weight:750}
+.next-note{margin-top:8px;font-size:11.5px;line-height:1.6;color:var(--ink-3)}
+.next-box .btn{margin-top:11px}
+
+@media(max-width:900px){
+  .block-head{grid-template-columns:minmax(0,1fr) 52px 16px;gap:8px;padding:11px}
+  .block-stage,.block-bar{display:none}
+  .dash-intro .mine-toggle{width:100%;justify-content:center}
+}
+
+/* ============================================================
+   일정 탭
+   ============================================================ */
+.sched-empty{
+  padding:44px 24px;text-align:center;color:var(--ink-3);
+  border:1px dashed var(--border);border-radius:14px;background:var(--raised);
+}
+.sched-empty b{display:block;font-size:14px;font-weight:700;color:var(--ink-2)}
+.sched-empty p{margin:8px 0 0;font-size:12.5px;line-height:1.7}
+
+.sched-list{display:flex;flex-direction:column;gap:13px;margin-top:4px}
+.sched-day{border:1px solid var(--border);border-radius:13px;background:var(--surface);overflow:hidden}
+.sched-date{
+  display:flex;align-items:center;gap:10px;
+  padding:9px 14px;border-bottom:1px solid var(--border);background:var(--raised);
+}
+.sched-date-main{font-size:13px;font-weight:750;color:var(--ink-1)}
+.sched-dday{
+  padding:2px 8px;border-radius:6px;background:var(--grid);
+  color:var(--ink-3);font-size:11px;font-weight:750;font-variant-numeric:tabular-nums;
+}
+.sched-day-count{margin-left:auto;font-size:11.5px;color:var(--ink-3)}
+.sched-day.is-today .sched-date{background:var(--wash)}
+.sched-day.is-today .sched-dday{background:var(--accent);color:#fff}
+.sched-day.is-soon .sched-dday{background:color-mix(in srgb,var(--warning) 22%,transparent);color:var(--warning)}
+.sched-day.is-past{opacity:.82}
+.sched-day.is-past .sched-date-main{color:var(--ink-2)}
+
+.sched-items{display:flex;flex-direction:column}
+.sched-item{
+  display:grid;align-items:center;gap:10px;
+  grid-template-columns:62px 34px minmax(150px,1.5fr) minmax(150px,1fr) 118px 96px;
+  width:100%;padding:10px 14px;border:0;border-top:1px solid var(--grid);
+  background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;
+}
+.sched-items>.sched-item:first-child{border-top:0}
+.sched-item:hover{background:var(--wash)}
+.sched-time{font-size:13px;font-weight:750;color:var(--ink-1);font-variant-numeric:tabular-nums}
+.sched-time i{font-style:normal;font-size:11.5px;font-weight:500;color:var(--ink-3)}
+.sched-round{
+  justify-self:start;padding:2px 7px;border-radius:6px;
+  background:var(--grid);color:var(--ink-2);font-size:10.5px;font-weight:750;
+}
+.sched-company{display:flex;align-items:center;gap:7px;min-width:0}
+.sched-company b{font-size:13px;font-weight:650;color:var(--ink-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sched-people{font-size:11.5px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sched-visit{
+  justify-self:start;padding:3px 9px;border-radius:7px;font-size:11.5px;font-weight:700;
+  background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--accent-ink);white-space:nowrap;
+}
+.sched-visit.is-off{background:none;color:var(--ink-3);font-weight:500;padding-left:0}
+.sched-item.is-visit{box-shadow:inset 3px 0 0 var(--accent)}
+.sched-log{justify-self:end;font-size:11.5px;font-weight:650;color:var(--critical);white-space:nowrap}
+.sched-log.ok{color:var(--good)}
+.sched-day.is-past .sched-log:not(.ok){
+  padding:2px 8px;border-radius:6px;
+  background:color-mix(in srgb,var(--critical) 12%,transparent);
+}
+.sched-missing-card{margin-top:14px}
+
+@media(max-width:900px){
+  .sched-item{
+    grid-template-columns:62px 34px minmax(0,1fr);
+    grid-template-areas:"time round company" ". . people" ". . visit" ". . log";
+    gap:3px 10px;padding:11px 13px;
+  }
+  .sched-time{grid-area:time} .sched-round{grid-area:round}
+  .sched-company{grid-area:company} .sched-people{grid-area:people}
+  .sched-visit{grid-area:visit;justify-self:start;margin-top:3px}
+  .sched-log{grid-area:log;justify-self:start;margin-top:2px}
+}

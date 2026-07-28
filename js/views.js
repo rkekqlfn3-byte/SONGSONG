@@ -2,7 +2,8 @@
    5. 대시보드
    ============================================================ */
 function viewDash() {
-  const { companies, coaches } = state.M;
+  const companies = scopedCompanies();
+  const coaches = scopedCoaches();
   const wrap = el('div');
 
   const byStatus = k => companies.filter(c => c.status === k);
@@ -26,6 +27,7 @@ function viewDash() {
         ? `기한 경과 ${overdue.length}건과 14일 이내 마감 ${soon.length}건을 우선 확인하세요.`
         : '현재 긴급하게 확인할 일정이 없습니다. 전체 진행 흐름을 점검하세요.'}</p>
     </div>`;
+  intro.appendChild(mineToggle());
   wrap.appendChild(intro);
 
   /* --- KPI --- */
@@ -110,20 +112,111 @@ function viewDash() {
     (k) => go('comp', { owner: k, status: '', q: '', coach: '' })));
 
   /* --- 코치 서류 미비 --- */
-  const cf = [
-    ['개인정보 수집 동의 [서식8]', coaches.filter(c => !filled(c.f8)).length],
-    ['정보공유 동의 [서식9]', coaches.filter(c => !filled(c.f9)).length],
-    ['사업 참여 서약 [서식10]', coaches.filter(c => !filled(c.f10)).length],
-    ['통장 사본', coaches.filter(c => !filled(c.bank)).length],
+  const COACH_DOCS = [
+    { k: 'f8', label: '개인정보 수집 동의 [서식8]' },
+    { k: 'f9', label: '정보공유 동의 [서식9]' },
+    { k: 'f10', label: '사업 참여 서약 [서식10]' },
+    { k: 'bank', label: '통장 사본' },
   ];
-  const coachCard = card('코치 제출 서류 미비', `코치 ${coaches.length}명 기준 · 미제출 인원`);
-  coachCard.appendChild(barChart(cf, n => `${n}명`, () => false, () => go('coach', { q: '' }), coaches.length, '--critical'));
+  const cf = COACH_DOCS.map(d => [d.label, coaches.filter(c => !filled(c[d.k])).length]);
+  const coachCard = card('코치 제출 서류 미비', `코치 ${coaches.length}명 기준 · 누르면 미제출 코치 명단`);
+  coachCard.appendChild(barChart(cf, n => `${n}명`, () => false,
+    label => {
+      const hit = COACH_DOCS.find(d => d.label === label);
+      go('coach', { missing: hit ? hit.k : '', q: '' });
+    }, coaches.length, '--critical'));
+
+  /* --- 지금 막힌 곳 --- */
+  const blockCard = buildBlockCard(active);
 
   const g1 = el('div', 'grid priority-grid'); g1.append(overCard, soonCard);
   const g2 = el('div', 'grid row-2'); g2.append(ownerCard, coachCard);
-  const stack = el('div', 'grid'); stack.append(pipeCard, g1, g2);
+  const stack = el('div', 'grid'); stack.append(pipeCard, blockCard, g1, g2);
   wrap.appendChild(stack);
   return wrap;
+}
+
+/**
+ * 「지금 막힌 곳」 — 진행 중 기업을 «다음에 필요한 서류» 하나로 묶는다.
+ * 어느 서류에서 몇 건이 멈춰 있는지, 그 건을 누가 처리해야 하는지 한 자리에서 본다.
+ */
+function buildBlockCard(active) {
+  const groups = new Map();
+  let allDone = 0;
+  active.forEach(c => {
+    const def = nextDocDef(c);
+    if (!def) { allDone++; return; }
+    if (!groups.has(def.k)) groups.set(def.k, { def, list: [] });
+    groups.get(def.k).list.push(c);
+  });
+  const rows = [...groups.values()].sort((a, b) => b.list.length - a.list.length);
+  const box = card('지금 막힌 곳', `진행 중 ${active.length}건 · 다음 한 칸 기준`);
+  box.classList.add('block-card');
+
+  if (!rows.length) {
+    box.appendChild(el('div', 'empty', '진행 중인 기업의 서류가 모두 채워져 있습니다.'));
+    return box;
+  }
+
+  const list = el('div', 'block-list');
+  rows.forEach(({ def, list: items }) => {
+    const row = el('div', 'block-row');
+    const head = el('button', 'block-head');
+    head.type = 'button';
+    head.setAttribute('aria-expanded', 'false');
+    const pct = Math.round(items.length / active.length * 100);
+    head.innerHTML =
+      `<span class="block-stage">${esc(def.stage)}</span>` +
+      `<span class="block-name">${esc(def.label)}</span>` +
+      `<span class="block-bar"><i style="width:${pct}%"></i></span>` +
+      `<strong class="block-count">${items.length}건</strong>` +
+      `<span class="block-caret" aria-hidden="true">▾</span>`;
+
+    const body = el('div', 'block-body');
+    body.hidden = true;
+    // 처리할 사람별로 묶어 보여준다 — 전화 한 통에 여러 건이 붙는다
+    const byActor = new Map();
+    items.forEach(c => {
+      const who = docActorOf(c, def);
+      if (!byActor.has(who)) byActor.set(who, []);
+      byActor.get(who).push(c);
+    });
+    [...byActor.entries()].sort((a, b) => b[1].length - a[1].length).forEach(([who, cs]) => {
+      const grp = el('div', 'block-actor');
+      grp.innerHTML = `<div class="block-actor-name">${def.byCoach ? '코치' : '담당'} ${esc(who)} <span class="dim">${cs.length}건</span></div>`;
+      const chips = el('div', 'block-chips');
+      cs.sort((a, b) => (a.dday ?? 9999) - (b.dday ?? 9999)).forEach(c => {
+        const b = el('button', 'block-chip' + (c.dday != null && c.dday < 0 ? ' is-over' : c.dday != null && c.dday <= 14 ? ' is-soon' : ''));
+        b.type = 'button';
+        b.innerHTML = `${esc(c.name)}${c.dday != null ? `<em>D${c.dday < 0 ? '+' + -c.dday : '-' + c.dday}</em>` : ''}`;
+        b.onclick = () => openCompany(c);
+        chips.appendChild(b);
+      });
+      grp.appendChild(chips);
+      body.appendChild(grp);
+    });
+
+    const jump = el('button', 'block-jump', '이 서류로 기업 목록 보기 →');
+    jump.type = 'button';
+    jump.onclick = () => go('comp', { block: def.k, status: ACTIVE_STATUS_FILTER, q: '', owner: '', coach: '', initial: '' });
+    body.appendChild(jump);
+
+    head.onclick = () => {
+      const open = body.hidden;
+      body.hidden = !open;
+      head.setAttribute('aria-expanded', String(open));
+      row.classList.toggle('is-open', open);
+    };
+    row.append(head, body);
+    list.appendChild(row);
+  });
+  box.appendChild(list);
+  if (allDone) {
+    const note = el('div', 'count-note');
+    note.textContent = `서류 15종이 모두 채워진 진행 중 기업 ${allDone}건은 여기에 표시되지 않습니다.`;
+    box.appendChild(note);
+  }
+  return box;
 }
 
 function alertList(list, kind) {
@@ -364,7 +457,9 @@ const COMP_SEARCH_FIELDS = c =>
 
 function filteredCompanies() {
   const s = state.comp;
-  return state.M.companies.filter(c => {
+  return scopedCompanies().filter(c => {
+    // 「막힌 서류」 — 이 기업의 다음 한 칸이 고른 서류인 건만
+    if (s.block) { const n = nextDocDef(c); if (!n || n.k !== s.block) return false; }
     if (s.status === ACTIVE_STATUS_FILTER) {
       if (!ACTIVE.has(c.status)) return false;
     } else if (s.status && c.status !== s.status) {
@@ -494,7 +589,7 @@ function openCompanyMemoEditor(company, host, trigger, options) {
 
 function viewCompanies() {
   const s = state.comp;
-  const all = state.M.companies;
+  const all = scopedCompanies();
   const currentRows = () => sortBy(filteredCompanies(), s.sort, s.dir, COMP_SORT).map(c => (c._key = c.name, c));
   const rows = currentRows();
   const activeFilters = el('div', 'active-filter-badge');
@@ -510,6 +605,9 @@ function viewCompanies() {
     picker(s.owner, [{ v: '(미배정)', t: '(미배정)' }].concat(uniq(all.map(c => c.owner)).map(v => ({ v, t: v }))),
       v => { s.owner = v; render(); }, '담당자 전체'),
     picker(s.coach, uniq(all.map(c => c.coachName)).map(v => ({ v, t: v })), v => { s.coach = v; render(); }, '코치 전체'),
+    picker(s.block, DOC_DEFS.filter(d => d.type !== 'auto').map(d => ({ v: d.k, t: d.label })),
+      v => { s.block = v; render(); }, '막힌 서류 전체'),
+    mineToggle(),
     activeFilters,
   ]);
   bar.appendChild(el('div', 'spacer'));
@@ -566,6 +664,12 @@ function viewCompanies() {
         return `D-${c.dday}`;
       } },
     { k: 'docs', h: '서류', sort: true, cell: c => meter(c.docCount, DOC_DEFS.length) },
+    { k: 'block', h: '다음 할 일', sort: false, cls: 'nowrap', cell: c => {
+        if (!ACTIVE.has(c.status)) return '<span class="dim">—</span>';
+        const d = nextDocDef(c);
+        if (!d) return '<span class="dim">서류 완료</span>';
+        return `<span class="next-doc"><b>${esc(d.label)}</b><em>${esc(docActorOf(c, d))}</em></span>`;
+      } },
   ];
 
   const tableOpts = () => ({
@@ -628,9 +732,10 @@ function viewCompanies() {
     if (s.status) labels.push(s.status === ACTIVE_STATUS_FILTER ? '진행 중 전체' : s.status);
     if (s.owner) labels.push(`담당 ${s.owner}`);
     if (s.coach) labels.push(`코치 ${s.coach}`);
+    if (s.block) { const d = byDocKey(s.block); labels.push(`「${d ? d.label : s.block}」에서 막힘`); }
     if (!s.q && s.initial) labels.push(`${s.initial} 기업`);
     paintActiveFilters(activeFilters, labels, () => {
-      Object.assign(s, { q: '', status: '', owner: '', coach: '', initial: '' });
+      Object.assign(s, { q: '', status: '', owner: '', coach: '', initial: '', block: '' });
       render();
     });
   }
@@ -648,25 +753,232 @@ function viewCompanies() {
 }
 
 /* ============================================================
+   7-2. 일정 탭
+
+   1차·2차를 «한 기업의 두 값»이 아니라 «각각 독립된 일정 한 건»으로 펼친다.
+   같은 기업이라도 회차마다 시간과 동행 담당자가 다르고, 동행이 2차에만
+   붙는 경우도 있어서 회차를 하나로 합치면 틀린 날짜를 보게 된다.
+   ============================================================ */
+
+/** 일정 줄에서 검색이 걸리는 값 — 기업·내부 담당자·코치·동행 담당자·기업 담당자·진행현황 */
+const SCHED_SEARCH_FIELDS = e => [
+  e.c.name, e.c.owner, e.c.coachName, e.owner,
+  e.c.contact && e.c.contact.name, e.c.status,
+];
+
+/** 기업 목록을 «일정 한 건» 단위로 펼친다. 날짜가 아직 없는 회차는 빠진다 */
+function scheduleEntries(companies) {
+  const out = [];
+  companies.forEach(c => {
+    (c.consultations || []).forEach((k, i) => {
+      if (!k.date && !filled(k.dateRaw)) return;
+      out.push({
+        c, round: i + 1,
+        date: k.date, dateRaw: k.dateRaw,
+        time: k.time, visit: k.visit, owner: k.owner,
+        logKey: i ? 'log2' : 'log1',
+      });
+    });
+  });
+  // 날짜를 못 읽은 자유 입력('8월초' 등)은 맨 뒤로 보낸다
+  return out.sort((a, b) => {
+    const av = a.date ? a.date.getTime() : Infinity;
+    const bv = b.date ? b.date.getTime() : Infinity;
+    if (av !== bv) return av - bv;
+    return (a.time || '').localeCompare(b.time || '') || a.c.name.localeCompare(b.c.name);
+  });
+}
+
+function viewSchedule() {
+  const s = state.sched;
+  const companies = scopedCompanies();
+  const all = scheduleEntries(companies);
+  const activeFilters = el('div', 'active-filter-badge');
+
+  const isPast = e => e.date && e.date < TODAY;
+  // 검색어는 매 글자마다 화면 전체를 다시 그리면 한글 조합이 끊기므로 목록만 갈아끼운다
+  const currentRows = () => {
+    const r = all.filter(e => {
+      if (s.when === 'up' && isPast(e)) return false;
+      if (s.when === 'past' && !isPast(e)) return false;
+      if (s.visitOnly && !e.visit) return false;
+      if (s.owner && (e.c.owner || '') !== s.owner) return false;
+      return matchesQuery(s.q, SCHED_SEARCH_FIELDS(e));
+    });
+    if (s.when === 'past') r.reverse();            // 지난 일정은 최근 것부터
+    return r;
+  };
+
+  const refreshFilterBadge = () => {
+    const labels = [];
+    if (s.q) labels.push(`검색 “${s.q}”`);
+    if (s.visitOnly) labels.push('동행하는 일정만');
+    if (s.owner) labels.push(`담당 ${s.owner}`);
+    paintActiveFilters(activeFilters, labels, () => {
+      Object.assign(s, { q: '', visitOnly: false, owner: '' });
+      render();
+    });
+  };
+
+  const bar = toolbar([
+    search(s.q, '기업 · 담당자 · 코치 검색 (초성 가능)', v => { s.q = v; refreshList(); }),
+    picker(s.when, [{ v: 'up', t: '다가오는 일정' }, { v: 'past', t: '지난 일정' }],
+      v => { s.when = v; render(); }, '전체 기간'),
+    picker(s.owner, uniq(companies.map(c => c.owner)).map(v => ({ v, t: v })),
+      v => { s.owner = v; render(); }, '담당자 전체'),
+    (() => {
+      const l = el('label', 'inline');
+      l.innerHTML = `<input type="checkbox"${s.visitOnly ? ' checked' : ''}> 동행하는 일정만`;
+      l.querySelector('input').onchange = e => { s.visitOnly = e.target.checked; render(); };
+      return l;
+    })(),
+    mineToggle(),
+    activeFilters,
+  ]);
+  bar.appendChild(el('div', 'spacer'));
+  const exp = el('button', 'btn', 'CSV 내보내기');
+  exp.onclick = () => csvDownload('컨설팅일정.csv', [
+    ['날짜', '시간', '기업', '회차', '동행', '동행 담당자', '내부 담당자', '코치', '수행일지', '진행현황'],
+    ...currentRows().map(e => [
+      e.date ? iso(e.date) : (e.dateRaw || ''), e.time || '', e.c.name, `${e.round}차`,
+      e.visit ? 'O' : '', e.visit ? (e.owner || '') : '', e.c.owner, e.c.coachName,
+      filled(e.c.docs[e.logKey]) ? '제출' : '미제출', e.c.status,
+    ]),
+  ]);
+  bar.appendChild(exp);
+
+  const listHost = el('div');
+  const countNote = el('div', 'count-note');
+  const box = el('div');
+  box.append(bar, listHost, countNote);
+
+  /* --- 날짜별 묶음 --- */
+  function buildList(rows) {
+    if (!rows.length) {
+      const empty = el('div', 'sched-empty');
+      empty.innerHTML = s.q || s.visitOnly || s.owner
+        ? '<b>검색 결과가 없습니다.</b>'
+        : s.when === 'up'
+          ? '<b>앞으로 잡힌 일정이 없습니다.</b><p>기업 상세창의 서류 칸에서 컨설팅 날짜와 시간을 적으면 여기에 쌓입니다.</p>'
+          : '<b>해당하는 일정이 없습니다.</b>';
+      return empty;
+    }
+    const groups = [];
+    rows.forEach(e => {
+      const key = e.date ? iso(e.date) : '(날짜 미확정)';
+      const last = groups[groups.length - 1];
+      if (last && last.key === key) last.items.push(e);
+      else groups.push({ key, date: e.date, items: [e] });
+    });
+
+    const list = el('div', 'sched-list');
+    groups.forEach(g => {
+      const day = el('section', 'sched-day');
+      const dd = g.date ? Math.round((g.date - TODAY) / 864e5) : null;
+      const tone = dd == null ? '' : dd < 0 ? ' is-past' : dd === 0 ? ' is-today' : dd <= 7 ? ' is-soon' : '';
+      day.className = 'sched-day' + tone;
+      day.innerHTML = `<div class="sched-date">
+        <span class="sched-date-main">${g.date ? korDate(g.date) : esc(g.items[0].dateRaw || '날짜 미확정')}</span>
+        ${dd == null ? '' : `<span class="sched-dday">${dd === 0 ? '오늘' : dd < 0 ? `${-dd}일 전` : `D-${dd}`}</span>`}
+        <span class="sched-day-count">${g.items.length}건</span>
+      </div>`;
+
+      const items = el('div', 'sched-items');
+      g.items.forEach(e => {
+        const row = el('button', 'sched-item' + (e.visit ? ' is-visit' : ''));
+        row.type = 'button';
+        const logDone = filled(e.c.docs[e.logKey]);
+        row.innerHTML =
+          `<span class="sched-time">${e.time ? esc(e.time) : '<i>시간 미정</i>'}</span>` +
+          `<span class="sched-round">${e.round}차</span>` +
+          `<span class="sched-company"><b>${esc(e.c.name)}</b>${badge(e.c.status)}</span>` +
+          `<span class="sched-people">코치 ${esc(e.c.coachName || '미배정')} · 담당 ${esc(e.c.owner || '미배정')}</span>` +
+          (e.visit
+            ? `<span class="sched-visit">동행 ${esc(e.owner || '담당자 미정')}</span>`
+            : '<span class="sched-visit is-off">동행 없음</span>') +
+          `<span class="sched-log${logDone ? ' ok' : ''}">수행일지 ${logDone ? '제출' : '미제출'}</span>`;
+        row.onclick = () => openCompany(e.c);
+        items.appendChild(row);
+      });
+      day.appendChild(items);
+      list.appendChild(day);
+    });
+    return list;
+  }
+
+  function refreshList() {
+    const rows = currentRows();
+    listHost.innerHTML = '';
+    listHost.appendChild(buildList(rows));
+    countNote.textContent = rows.length
+      ? `${rows.length}건 표시 / 전체 일정 ${all.length}건 (기업 ${companies.length}곳) · 줄을 누르면 기업 상세가 열립니다`
+      : '';
+    refreshFilterBadge();
+  }
+  refreshList();
+
+  /* --- 아직 일정이 없는 진행 중 기업 --- */
+  const missing = companies.filter(c => ACTIVE.has(c.status)
+    && !c.consultations.some(k => k.date || filled(k.dateRaw)));
+  if (missing.length) {
+    const mc = card(`일정이 아직 없는 진행 중 기업 ${missing.length}곳`,
+      '기업을 누르면 상세창에서 컨설팅 날짜를 적을 수 있습니다');
+    mc.classList.add('sched-missing-card');
+    const chips = el('div', 'block-chips');
+    missing.sort((a, b) => (a.dday ?? 9999) - (b.dday ?? 9999)).forEach(c => {
+      const b = el('button', 'block-chip' + (c.dday != null && c.dday < 0 ? ' is-over' : c.dday != null && c.dday <= 14 ? ' is-soon' : ''));
+      b.type = 'button';
+      b.innerHTML = `${esc(c.name)}${c.dday != null ? `<em>D${c.dday < 0 ? '+' + -c.dday : '-' + c.dday}</em>` : ''}`;
+      b.onclick = () => openCompany(c);
+      chips.appendChild(b);
+    });
+    mc.appendChild(chips);
+    box.appendChild(mc);
+  }
+  return box;
+}
+
+/* ============================================================
    8. 코치 탭
    ============================================================ */
+const COACH_DOC_FILTERS = [
+  { v: 'f8', t: '서식8 미제출' },
+  { v: 'f9', t: '서식9 미제출' },
+  { v: 'f10', t: '서식10 미제출' },
+  { v: 'bank', t: '통장 사본 미제출' },
+];
 function viewCoaches() {
   const s = state.coach;
-  const all = state.M.coaches;
+  const all = scopedCoaches();
+  const activeFilters = el('div', 'active-filter-badge');
   const currentRows = () => {
-    const list = all.filter(c => matchesQuery(s.q, [c.name, c.owner, c.email, c.phone]));
+    let list = all.filter(c => matchesQuery(s.q, [c.name, c.owner, c.email, c.phone]));
+    if (s.missing) list = list.filter(c => !filled(c[s.missing]));
     return sortBy(list, s.sort, s.dir, { load: c => c.companies.length }).map(c => (c._key = c.name, c));
+  };
+  const refreshFilterBadge = () => {
+    const labels = [];
+    if (s.q) labels.push(`검색 “${s.q}”`);
+    if (s.missing) labels.push((COACH_DOC_FILTERS.find(f => f.v === s.missing) || {}).t || s.missing);
+    paintActiveFilters(activeFilters, labels, () => {
+      Object.assign(s, { q: '', missing: '' });
+      render();
+    });
   };
 
   const bar = toolbar([
     search(s.q, '코치 · 담당자 · 이메일 검색', v => { s.q = v; refreshList(); }),
+    picker(s.missing, COACH_DOC_FILTERS, v => { s.missing = v; render(); }, '제출 서류 전체'),
     (() => {
       const l = el('label', 'inline');
       l.innerHTML = `<input type="checkbox"${s.reveal ? ' checked' : ''}> 생년월일·주소 표시`;
       l.querySelector('input').onchange = e => { s.reveal = e.target.checked; render(); };
       return l;
     })(),
+    mineToggle(),
+    activeFilters,
   ]);
+  refreshFilterBadge();
   bar.appendChild(el('div', 'spacer'));
   const exp = el('button', 'btn', 'CSV 내보내기');
   exp.onclick = () => csvDownload('코치목록.csv', [
@@ -710,6 +1022,7 @@ function viewCoaches() {
     listHost.innerHTML = '';
     listHost.appendChild(table(cols, rows, tableOpts()));
     countNote.textContent = `${rows.length}명 표시 / 전체 ${all.length}명`;
+    refreshFilterBadge();
   }
   refreshList();
   return box;

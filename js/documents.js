@@ -45,7 +45,7 @@ function paintDocsMobileCard(card, company, defs) {
 function viewDocs() {
   const s = state.docs;
   const defs = DOC_DEFS.filter(d => !s.stage || d.stage === s.stage);
-  let list = state.M.companies.filter(c => matchesQuery(s.q, DOC_SEARCH_FIELDS(c)));
+  let list = scopedCompanies().filter(c => matchesQuery(s.q, DOC_SEARCH_FIELDS(c)));
   if (s.missingOnly) list = list.filter(c => defs.some(d => !filled(c.docs[d.k])));
   const activeFilters = el('div', 'active-filter-badge');
   const refreshFilterBadge = () => {
@@ -72,6 +72,7 @@ function viewDocs() {
       l.querySelector('input').onchange = e => { s.missingOnly = e.target.checked; render(); };
       return l;
     })(),
+    mineToggle(),
     activeFilters,
   ]);
   refreshFilterBadge();
@@ -1013,7 +1014,31 @@ function openCompany(c, docsEditMode) {
     ? `${c.latestVisit.date ? korDate(c.latestVisit.date) : esc(c.latestVisit.dateRaw || '일자 미정')} ${esc(c.latestVisit.time || '')} · ${esc(c.latestVisit.owner || '담당자 미정')}`
     : '';
 
+  // 「다음 할 일」 — 서류 15칸 중 아직 안 채워진 첫 칸 하나만 집어준다
+  const nextDef = ACTIVE.has(c.status) ? nextDocDef(c) : null;
+  const nextHtml = !ACTIVE.has(c.status)
+    ? ''
+    : nextDef
+      ? `<div class="sect next-sect">
+          <h4>다음 할 일</h4>
+          <div class="next-box">
+            <div class="next-doc-name">${esc(nextDef.label)}</div>
+            <div class="next-doc-meta">
+              <span class="next-stage">${esc(nextDef.stage)}단계</span>
+              <span>${nextDef.byCoach ? '코치' : '담당'} <b>${esc(docActorOf(c, nextDef))}</b></span>
+              ${c.dday != null ? `<span class="${c.dday < 0 ? 'next-over' : c.dday <= 14 ? 'next-soon' : ''}">${c.dday < 0 ? `기한 ${-c.dday}일 경과` : `D-${c.dday}`}</span>` : ''}
+            </div>
+            ${nextDef.byCoach ? '<div class="next-note">코치 공통 서류입니다. 이 코치가 맡은 다른 기업도 함께 막혀 있을 수 있습니다.</div>' : ''}
+            <button class="btn" type="button" id="gotoNextDoc">같은 곳에서 막힌 기업 보기</button>
+          </div>
+        </div>`
+      : `<div class="sect next-sect">
+          <h4>다음 할 일</h4>
+          <div class="next-box is-done"><div class="next-doc-name">서류 15종이 모두 채워졌습니다.</div></div>
+        </div>`;
+
   openDrawer(esc(c.name), `${badge(c.status)} <span class="dim">담당 ${esc(c.owner || '미배정')}</span>`, `
+    ${nextHtml}
     <div class="sect memo-sect">
       <div class="sect-head"><h4>메모</h4><button type="button" class="memo-edit-button" id="editCompanyMemo">${c.memo ? '수정' : '메모 추가'}</button></div>
       <p class="memo-text${c.memo ? '' : ' dim'}" data-company-memo-display>${esc(c.memo || '등록된 메모가 없습니다.')}</p>
@@ -1056,6 +1081,12 @@ function openCompany(c, docsEditMode) {
     </div>
     <div class="sect"><button class="btn primary" id="drawerDocsAction" style="width:100%">${docsEditMode ? '전체 저장' : '서류 수정'}</button></div>
   `, d => {
+    const gotoNext = $('#gotoNextDoc', d);
+    if (gotoNext && nextDef) {
+      gotoNext.onclick = () => go('comp', {
+        block: nextDef.k, status: ACTIVE_STATUS_FILTER, q: '', owner: '', coach: '', initial: '',
+      });
+    }
     $('#editCompanyMemo', d).onclick = event => {
       const trigger = event.currentTarget;
       const display = $('[data-company-memo-display]', d);

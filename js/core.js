@@ -392,6 +392,21 @@ const docLocked = d => !!d.byCoach;
 const docEditable = () => true;
 const STAGES = ['신청', '확정', '실시', '지급'];
 
+/**
+ * «지금 막힌 서류» — DOC_DEFS 차례대로 훑어 처음으로 비어 있는 칸.
+ * 약정 종료일은 시작일을 적으면 저절로 붙으므로 막힌 것으로 세지 않는다.
+ * 전부 채워졌으면 null.
+ */
+function nextDocDef(company) {
+  if (!company || !company.docs) return null;
+  return DOC_DEFS.find(d => d.type !== 'auto' && !filled(company.docs[d.k])) || null;
+}
+/** 그 서류를 채워야 할 사람 — 코치 공통 서류면 코치, 아니면 내부 담당자 */
+function docActorOf(company, def) {
+  if (!def) return '';
+  return def.byCoach ? (company.coachName || '코치 미배정') : (company.owner || '담당자 미배정');
+}
+
 /** 진행현황 — 순서 = 파이프라인 진행 방향. term=종료(비활성) 상태 */
 const STATUS = [
   { k: '검토요청',   v: '--p0' },
@@ -573,16 +588,22 @@ function normalize(raw) {
 const TABS = [
   { k: 'dash',   t: '대시보드' },
   { k: 'comp',   t: '기업' },
+  { k: 'sched',  t: '일정' },
   { k: 'coach',  t: '코치' },
   { k: 'docs',   t: '서류 현황' },
   { k: 'mail',   t: '메일 작성기' },
 ];
+const MINE_KEY = APP_STORAGE_KEY + ':mineOnly';
 const state = {
   tab: 'dash',
   M: null,                                   // 정규화 모델
   src: '내장 스냅샷',
-  comp:  { q: '', status: '', owner: '', coach: '', initial: '', sort: 'end', dir: 1, sel: null },
-  coach: { q: '', sort: 'name', dir: 1, sel: null, reveal: false },
+  // 「내 담당만」 — 설정에 적어둔 담당자 이름으로 모든 화면을 걸러본다
+  mine: (() => { try { return localStorage.getItem(MINE_KEY) === '1'; } catch { return false; } })(),
+  comp:  { q: '', status: '', owner: '', coach: '', initial: '', block: '', sort: 'end', dir: 1, sel: null },
+  // 일정 — 1차·2차를 각각 «한 건»으로 펼쳐 날짜순으로 본다
+  sched: { q: '', when: 'up', visitOnly: false, owner: '' },
+  coach: { q: '', missing: '', sort: 'name', dir: 1, sel: null, reveal: false },
   docs:  { q: '', stage: '', missingOnly: false },
   mail:  { stage: '신청단계', target: '기업 담당자', company: '', manual: '' },
 };
@@ -597,7 +618,7 @@ function render() {
   liveSearch = null;                          // 새로 그리는 화면이 자기 것으로 다시 채운다
 
   renderTabs();
-  const f = { dash: viewDash, comp: viewCompanies, coach: viewCoaches, docs: viewDocs, mail: viewMail }[state.tab];
+  const f = { dash: viewDash, comp: viewCompanies, sched: viewSchedule, coach: viewCoaches, docs: viewDocs, mail: viewMail }[state.tab];
   VIEW.innerHTML = '';
   VIEW.appendChild(f());
   if (typeof enhanceSearchableSelects === 'function') enhanceSearchableSelects(VIEW);
@@ -614,6 +635,43 @@ function render() {
 function go(tab, patch) {
   if (patch) Object.assign(state[tab], patch);
   state.tab = tab; closeDrawer(); render();
+}
+
+/* 「내 담당만」 범위 ---------------------------------------- */
+/** 설정 ⚙ 에 적어둔 내 이름. 비어 있으면 스위치를 켤 수 없다 */
+function myOwnerName() { return storedWebOperatorName(); }
+/** 스위치가 실제로 걸려 있는지 — 이름을 안 적었으면 항상 꺼진 것으로 본다 */
+function mineActive() { return !!(state.mine && myOwnerName()); }
+/** 대시보드·기업·서류 화면이 공통으로 쓰는 기업 목록 */
+function scopedCompanies() {
+  const all = (state.M && state.M.companies) || [];
+  if (!mineActive()) return all;
+  const me = myOwnerName();
+  return all.filter(c => c.owner === me);
+}
+/** 내가 맡은 기업에 배정된 코치만 */
+function scopedCoaches() {
+  const all = (state.M && state.M.coaches) || [];
+  if (!mineActive()) return all;
+  const me = myOwnerName();
+  return all.filter(k => (k.companies || []).some(c => c.owner === me));
+}
+function setMineOnly(on) {
+  state.mine = !!on;
+  try { localStorage.setItem(MINE_KEY, state.mine ? '1' : '0'); } catch {}
+  render();
+}
+/** 화면 위쪽에 붙는 «내 담당만» 스위치 — 이름이 없으면 안내로 바뀐다 */
+function mineToggle() {
+  const me = myOwnerName();
+  const wrap = el('label', 'mine-toggle' + (mineActive() ? ' is-on' : '') + (me ? '' : ' is-disabled'));
+  if (!me) {
+    wrap.innerHTML = '<span>내 담당만 보려면 ⚙ 에서 담당자 이름을 적어주세요</span>';
+    return wrap;
+  }
+  wrap.innerHTML = `<input type="checkbox"${state.mine ? ' checked' : ''}><span>내 담당만 <b>${esc(me)}</b></span>`;
+  wrap.querySelector('input').onchange = e => setMineOnly(e.target.checked);
+  return wrap;
 }
 function renderTabs() {
   const n = state.M;
