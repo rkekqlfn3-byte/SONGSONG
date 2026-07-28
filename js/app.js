@@ -20,7 +20,8 @@
    */
   let loaded = false;
   try {
-    const saved = localStorage.getItem(LS_KEY);
+    // 열쇠가 없으면 받아둔 자료도 꺼내지 않는다 — 잠금 화면 뒤에 명단이 남아 있으면 안 된다
+    const saved = storedAuthKey() ? localStorage.getItem(LS_KEY) : null;
     if (saved) { applyData(JSON.parse(saved), '저장된 최근 데이터', false); loaded = true; }
   } catch (e) { console.warn('저장된 데이터를 읽지 못했습니다', e); }
   if (!loaded) showDataPlaceholder('Google Sheet에서 자료를 불러오는 중입니다…', '');
@@ -243,13 +244,21 @@
     }
   });
 
-  // 연결된 주소가 있으면 저장 데이터를 먼저 보여준 뒤 백그라운드에서 최신화
+  $('#authLogout').onclick = () => {
+    if (!confirm('이 브라우저에서 로그아웃하면 다음에 열 때 암호를 다시 넣어야 합니다.\n로그아웃할까요?')) return;
+    clearAuth();
+    closeSyncDialog();
+    location.reload();
+  };
+
+  // 암호부터 확인한다. 통과해야 자료를 불러온다
   const endpoint = localStorage.getItem(SHEET_ENDPOINT_KEY) || DEFAULT_SHEET_URL;
-  syncFromSheet(endpoint, { silent: true, saveEndpoint: true, reason: 'boot' });
+  initAuthGate().then(ok => {
+    if (!ok) return;                         // 잠금 화면이 떠 있다 — 들어오면 그때 불러온다
+    syncFromSheet(endpoint, { silent: true, saveEndpoint: true, reason: 'boot' });
+    refreshActivityLogsFromSheet({ silent: true }).catch(error => console.error(error));
+  });
   initAutoSync();
   initMidnightRefresh();
   renderActivityLogs();
-  // 작업 이력 건수는 패널을 열기 전에도 맞아야 한다.
-  // 열 때만 불러오면 실제로 기록이 있어도 화면에는 0으로 보인다.
-  refreshActivityLogsFromSheet({ silent: true }).catch(error => console.error(error));
 })();

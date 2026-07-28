@@ -29,8 +29,168 @@
  *   ?action=syncStatuses&payload=...   1차 컨설팅일 기준 진행현황 자동 갱신
  */
 
-const VERSION = '2026-07-27-cache1';
-const API_CAPABILITIES = ['syncStatuses'];
+const VERSION = '2026-07-28-auth1';
+const API_CAPABILITIES = ['syncStatuses', 'auth'];
+
+/* ============================================================
+   사용자 문지기
+
+   자료가 오가는 길은 이 파일 하나뿐이므로, 여기서만 막으면 된다.
+   웹 화면은 «암호» 자체를 보내지 않는다. 암호를 지문으로 바꿔서 보낸다.
+   그래서 주소창·기록 어디에도 암호 원문이 남지 않는다.
+
+   시트의 «계정» 탭에는 그 지문을 한 번 더 섞어 저장한다.
+   탭을 그대로 보더라도 거기서 암호를 되돌릴 수 없다.
+
+   등급 master = 사용자를 추가·삭제할 수 있다
+   등급 user   = 화면만 쓴다
+   ============================================================ */
+const AUTH_SHEET = '계정';
+const AUTH_HEADERS = ['이름', '등급', '열쇠', '등록일', '등록한사람', '마지막사용'];
+const AUTH_SALT = 'ai-roadmap-2026-gate-9f3a';
+/** 처음 한 번 «계정» 탭을 만들 때 넣을 사람. 암호 원문은 여기에도 없다 */
+const AUTH_SEED = [
+  { name: '마스터', role: 'master', key: '8ea9df4609e22aeb5f213e012d0d4bdd983cdba5522fbb7db023c278042eed42' },
+  { name: '김채은', role: 'user',   key: 'a4193cbdd1423aa9605937a24d5f686c706fcaed510ae2b9ad0f536ab99783cc' },
+];
+/** 문지기를 거치지 않는 요청 — 버전 확인만 열어 둔다 */
+const AUTH_FREE_ACTIONS = { ping: true, auth: true };
+
+/** 웹이 보낸 지문을 시트에 저장하는 형태로 한 번 더 섞는다 */
+function authStore_(clientKey) {
+  const bytes = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256, String(clientKey) + '|' + AUTH_SALT, Utilities.Charset.UTF_8);
+  return bytes.map(function (b) { return ('0' + (b & 0xff).toString(16)).slice(-2); }).join('');
+}
+
+function ensureAuthSheet_(book) {
+  let sheet = book.getSheetByName(AUTH_SHEET);
+  if (!sheet) {
+    sheet = book.insertSheet(AUTH_SHEET);
+    sheet.getRange(1, 1, 1, AUTH_HEADERS.length).setValues([AUTH_HEADERS]);
+    sheet.setFrozenRows(1);
+    sheet.getRange(1, 1, 1, AUTH_HEADERS.length).setFontWeight('bold');
+    const now = new Date();
+    AUTH_SEED.forEach(function (s) {
+      sheet.appendRow([s.name, s.role, s.key, now, '최초 설정', '']);
+    });
+    sheet.hideSheet();                 // 평소에는 눈에 안 띄게 접어 둔다
+  }
+  return sheet;
+}
+
+function readAccounts_() {
+  const book = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ensureAuthSheet_(book);
+  const last = sheet.getLastRow();
+  if (last < 2) return [];
+  const values = sheet.getRange(2, 1, last - 1, AUTH_HEADERS.length).getValues();
+  return values.map(function (row, i) {
+    return {
+      row: i + 2,
+      name: cleanText_(row[0]),
+      role: cleanText_(row[1]) === 'master' ? 'master' : 'user',
+      key: cleanText_(row[2]),
+      createdAt: row[3],
+      createdBy: cleanText_(row[4]),
+      lastUsed: row[5],
+    };
+  }).filter(function (a) { return a.key; });
+}
+
+/**
+ * 요청에 딸려 온 열쇠를 확인한다.
+ * 맞으면 그 사람 정보를 돌려주고, 아니면 예외를 던진다.
+ */
+function requireAccount_(e) {
+  const clientKey = cleanText_(e && e.parameter ? e.parameter.key : '');
+  if (!clientKey) {
+    const err = new Error('암호가 필요합니다.');
+    err.authRequired = true;
+    throw err;
+  }
+  const stored = authStore_(clientKey);
+  const found = readAccounts_().filter(function (a) { return a.key === stored; })[0];
+  if (!found) {
+    const err = new Error('암호가 맞지 않습니다.');
+    err.authRequired = true;
+    throw err;
+  }
+  try {
+    const book = SpreadsheetApp.openById(SPREADSHEET_ID);
+    ensureAuthSheet_(book).getRange(found.row, 6).setValue(new Date());
+  } catch (ignore) {}
+  return found;
+}
+
+function requireMaster_(e) {
+  const account = requireAccount_(e);
+  if (account.role !== 'master') {
+    const err = new Error('사용자를 추가·삭제할 수 있는 계정이 아닙니다.');
+    err.authRequired = false;
+    throw err;
+  }
+  return account;
+}
+
+/** 마스터가 사용자 목록을 볼 때 — 열쇠 값은 절대 내보내지 않는다 */
+function listAccounts_() {
+  return readAccounts_().map(function (a) {
+    return { name: a.name, role: a.role, createdAt: a.createdAt, createdBy: a.createdBy, lastUsed: a.lastUsed };
+  });
+}
+
+function addAccount_(payload, actor) {
+  const name = cleanText_(payload.name);
+  const clientKey = cleanText_(payload.newKey);
+  const role = cleanText_(payload.role) === 'master' ? 'master' : 'user';
+  if (!name) throw new Error('이름을 적어주세요.');
+  if (!clientKey) throw new Error('암호를 적어주세요.');
+  const accounts = readAccounts_();
+  if (accounts.some(function (a) { return a.name === name; })) {
+    throw new Error('같은 이름이 이미 있습니다.');
+  }
+  const stored = authStore_(clientKey);
+  if (accounts.some(function (a) { return a.key === stored; })) {
+    throw new Error('이미 쓰고 있는 암호입니다. 다른 암호를 정해주세요.');
+  }
+  const book = SpreadsheetApp.openById(SPREADSHEET_ID);
+  ensureAuthSheet_(book).appendRow([name, role, stored, new Date(), actor || '', '']);
+  return { name: name, role: role };
+}
+
+function removeAccount_(payload, actor) {
+  const name = cleanText_(payload.name);
+  if (!name) throw new Error('지울 사람을 골라주세요.');
+  if (name === actor) throw new Error('지금 쓰고 있는 계정은 지울 수 없습니다.');
+  const accounts = readAccounts_();
+  const target = accounts.filter(function (a) { return a.name === name; })[0];
+  if (!target) throw new Error('그런 이름이 없습니다.');
+  if (target.role === 'master' && accounts.filter(function (a) { return a.role === 'master'; }).length <= 1) {
+    throw new Error('마지막 남은 관리자 계정은 지울 수 없습니다.');
+  }
+  const book = SpreadsheetApp.openById(SPREADSHEET_ID);
+  ensureAuthSheet_(book).deleteRow(target.row);
+  return { name: name };
+}
+
+/** 이미 있는 사람의 암호를 바꾼다 */
+function changeAccountKey_(payload) {
+  const name = cleanText_(payload.name);
+  const clientKey = cleanText_(payload.newKey);
+  if (!name) throw new Error('바꿀 사람을 골라주세요.');
+  if (!clientKey) throw new Error('새 암호를 적어주세요.');
+  const accounts = readAccounts_();
+  const target = accounts.filter(function (a) { return a.name === name; })[0];
+  if (!target) throw new Error('그런 이름이 없습니다.');
+  const stored = authStore_(clientKey);
+  if (accounts.some(function (a) { return a.key === stored && a.name !== name; })) {
+    throw new Error('다른 사람이 쓰고 있는 암호입니다.');
+  }
+  const book = SpreadsheetApp.openById(SPREADSHEET_ID);
+  ensureAuthSheet_(book).getRange(target.row, 3).setValue(stored);
+  return { name: name };
+}
 
 const SPREADSHEET_ID = '1zFc5m2g25y_CV1JqYhrKo3aR0v0yzyIIZtuyjNsKr2Q';
 /*
@@ -185,6 +345,32 @@ function doGet(e) {
   let skipDefaultAudit = false;
   try {
     if (action === 'ping') return response_({ ok: true, message: 'ready', version: VERSION, capabilities: API_CAPABILITIES }, e);
+
+    // 암호 확인 — 맞으면 이름과 등급을 돌려준다
+    if (action === 'auth') {
+      const who = requireAccount_(e);
+      return response_({ ok: true, version: VERSION, name: who.name, role: who.role, capabilities: API_CAPABILITIES }, e);
+    }
+
+    // 여기서부터는 열쇠가 있어야 지나간다
+    let account = null;
+    if (!AUTH_FREE_ACTIONS[action]) account = requireAccount_(e);
+
+    // 사용자 관리 — 마스터만
+    if (action === 'listAccounts') {
+      requireMaster_(e);
+      return response_({ ok: true, version: VERSION, accounts: listAccounts_() }, e);
+    }
+    if (action === 'addAccount' || action === 'removeAccount' || action === 'changeAccountKey') {
+      const master = requireMaster_(e);
+      const body = JSON.parse((e.parameter && e.parameter.payload) || '{}');
+      const done = action === 'addAccount' ? addAccount_(body, master.name)
+        : action === 'removeAccount' ? removeAccount_(body, master.name)
+          : changeAccountKey_(body);
+      appendAuditLog_(auditRecord_(action, { name: body.name }, done, true, ''));
+      return response_(Object.assign({ ok: true, version: VERSION, accounts: listAccounts_() }, done), e);
+    }
+
     if (action === 'diag') return response_({ ok: true, version: VERSION, sheets: diag_() }, e);
     if (action === 'getAuditLogs') {
       const requested = JSON.parse((e.parameter && e.parameter.payload) || '{}');
@@ -244,10 +430,15 @@ function doGet(e) {
     const auditLogged = skipDefaultAudit ? !!result.auditLogged : appendAuditLog_(auditRecord_(action, payload, result, true, ''));
     return response_(Object.assign({ ok: true, version: VERSION, auditLogged: auditLogged }, result), e);
   } catch (error) {
-    if (action && action !== 'ping' && action !== 'diag' && action !== 'getAuditLogs') {
-      appendAuditLog_(auditRecord_(action, payload, null, false, error && error.message ? error.message : String(error)));
+    const message = error && error.message ? error.message : String(error);
+    // 암호 문제는 시트 기록을 남기지 않는다 — 남기면 실패 기록만 잔뜩 쌓인다
+    if (error && error.authRequired) {
+      return response_({ ok: false, authRequired: true, error: message }, e);
     }
-    return response_({ ok: false, error: error && error.message ? error.message : String(error) }, e);
+    if (action && action !== 'ping' && action !== 'diag' && action !== 'getAuditLogs') {
+      appendAuditLog_(auditRecord_(action, payload, null, false, message));
+    }
+    return response_({ ok: false, error: message }, e);
   }
 }
 

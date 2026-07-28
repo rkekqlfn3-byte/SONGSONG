@@ -1588,3 +1588,65 @@ tbody tr.sel td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
   .sched-visit{grid-area:visit;justify-self:start;margin-top:3px}
   .sched-log{grid-area:log;justify-self:start;margin-top:2px}
 }
+
+/* ============================================================
+   잠금 화면 · 사용자 관리
+   ============================================================ */
+.auth-gate{
+  position:fixed;inset:0;z-index:200;display:grid;place-items:center;padding:24px;
+  background:linear-gradient(128deg,var(--navy) 0%,var(--navy-2) 64%,#245594 140%);
+}
+.auth-box{
+  width:min(360px,100%);padding:30px 28px;border-radius:16px;
+  background:var(--surface);box-shadow:0 20px 60px rgba(8,20,38,.4);text-align:center;
+}
+.auth-mark{font-size:28px;line-height:1}
+.auth-box h2{margin:12px 0 0;font-size:16.5px;font-weight:760;letter-spacing:-.02em;color:var(--ink-1)}
+.auth-sub{margin:6px 0 20px;font-size:12.5px;color:var(--ink-3)}
+.auth-field{display:block;text-align:left}
+.auth-field span{display:block;margin-bottom:5px;font-size:11.5px;font-weight:700;color:var(--ink-2)}
+.auth-field input{
+  width:100%;min-height:38px;padding:8px 11px;border:1px solid var(--border);border-radius:9px;
+  background:var(--raised);color:var(--ink-1);font:inherit;font-size:13.5px;
+}
+.auth-field input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.auth-state{min-height:17px;margin:9px 0 3px;font-size:12px;color:var(--ink-3)}
+.auth-state.bad{color:var(--critical);font-weight:650}
+.auth-box .btn.primary{width:100%;margin-top:8px;min-height:38px}
+.auth-note{margin:14px 0 0;font-size:11px;line-height:1.6;color:var(--ink-3)}
+
+.auth-section{margin-top:16px;padding-top:15px;border-top:1px solid var(--border)}
+.auth-who{margin-bottom:9px;font-size:12.5px;color:var(--ink-2)}
+.auth-who b{color:var(--ink-1);font-weight:750}
+.account-role{
+  display:inline-block;margin-left:5px;padding:1px 7px;border-radius:6px;
+  background:var(--grid);color:var(--ink-3);font-size:10.5px;font-weight:750;
+}
+.account-role.is-master{background:var(--wash);color:var(--accent-ink)}
+.account-manager{margin-top:15px}
+.account-loading,.account-error{padding:14px 2px;font-size:12.5px;color:var(--ink-3)}
+.account-error{color:var(--critical)}
+.account-head h3,.account-add h3{margin:0 0 9px;font-size:12.5px;font-weight:750;color:var(--ink-2)}
+.account-list{display:flex;flex-direction:column;gap:7px}
+.account-row{padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--raised)}
+.account-name{font-size:13px;font-weight:700;color:var(--ink-1)}
+.account-name em{
+  margin-left:5px;padding:1px 6px;border-radius:5px;background:var(--accent);
+  color:#fff;font-style:normal;font-size:10px;font-weight:750;
+}
+.account-meta{margin-top:3px;font-size:11px;color:var(--ink-3)}
+.account-actions{display:flex;gap:6px;margin-top:8px}
+.account-actions .btn{min-height:28px;padding:3px 9px;font-size:11.5px}
+.btn.account-danger{border-color:color-mix(in srgb,var(--critical) 35%,var(--border));color:var(--critical)}
+.btn.account-danger[disabled]{opacity:.4;cursor:default}
+.account-add{margin-top:16px;padding-top:14px;border-top:1px dashed var(--border)}
+.account-add-fields{display:grid;gap:8px}
+.account-add-fields label{display:block}
+.account-add-fields span{display:block;margin-bottom:4px;font-size:11px;font-weight:700;color:var(--ink-2)}
+.account-add-fields input,.account-add-fields select{
+  width:100%;min-height:34px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;
+  background:var(--surface);color:var(--ink-1);font:inherit;font-size:12.5px;
+}
+.account-state{min-height:16px;margin:8px 0 6px;font-size:11.5px;color:var(--ink-3)}
+.account-state.bad{color:var(--critical);font-weight:650}
+.account-state.ok{color:var(--good);font-weight:650}

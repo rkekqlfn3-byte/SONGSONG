@@ -21,6 +21,52 @@ const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1zFc5m2g25y_CV
  */
 const DEFAULT_WRITE_URL = 'https://script.google.com/macros/s/AKfycbwK8dm8mUev8vMZeLLHWRbQI-p0viyqIMzIuuVP7nxjA2V-CEd9Nc4dd02vexJvsZ8x3w/exec';
 
+/* ============================================================
+   암호 (열쇠)
+
+   암호 원문은 이 브라우저 밖으로 나가지 않는다.
+   원문을 «지문»으로 바꿔 저장하고, 시트에 보낼 때도 지문만 보낸다.
+   그래서 주소창에도, 시트 쪽 기록에도 암호가 남지 않는다.
+   ============================================================ */
+const AUTH_KEY = LS_KEY + ':authKey';
+const AUTH_NAME_KEY = LS_KEY + ':authName';
+const AUTH_ROLE_KEY = LS_KEY + ':authRole';
+
+/** 암호 → 지문 */
+async function makeAuthKey(password) {
+  const bytes = new TextEncoder().encode(String(password));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function storedAuthKey() {
+  try { return String(localStorage.getItem(AUTH_KEY) || ''); } catch { return ''; }
+}
+function storedAuthName() {
+  try { return String(localStorage.getItem(AUTH_NAME_KEY) || ''); } catch { return ''; }
+}
+function isMasterAccount() {
+  try { return localStorage.getItem(AUTH_ROLE_KEY) === 'master'; } catch { return false; }
+}
+function saveAuth(key, name, role) {
+  try {
+    localStorage.setItem(AUTH_KEY, key);
+    localStorage.setItem(AUTH_NAME_KEY, name || '');
+    localStorage.setItem(AUTH_ROLE_KEY, role || 'user');
+  } catch {}
+}
+function clearAuth() {
+  try {
+    localStorage.removeItem(AUTH_KEY);
+    localStorage.removeItem(AUTH_NAME_KEY);
+    localStorage.removeItem(AUTH_ROLE_KEY);
+    // 받아둔 기업·코치 자료도 같이 지운다.
+    // 남겨두면 로그아웃한 컴퓨터에 명단이 그대로 남는다
+    localStorage.removeItem(LS_KEY);
+    localStorage.removeItem(LAST_SYNC_KEY);
+  } catch {}
+  if (typeof state !== 'undefined') state.M = null;
+}
+
 let lastFailedWrite = null;
 function syncClock(value) {
   const date = value ? new Date(value) : null;
@@ -390,6 +436,7 @@ function openSyncDialog() {
   SYNC_WRITE_ENDPOINT.value = writeEndpoint();
   SYNC_OPERATOR.value = localStorage.getItem(WEB_OPERATOR_KEY) || '';
   setSyncState('');
+  if (typeof paintAuthSection === 'function') paintAuthSection();
   SYNC_DIALOG.classList.add('open');
   SYNC_DIALOG.setAttribute('aria-hidden', 'false');
   requestAnimationFrame(() => SYNC_ENDPOINT.focus());
@@ -434,6 +481,11 @@ function syncBlockedByEditing() {
 
 async function syncFromSheet(endpoint, options) {
   const opts = options || {};
+  // 잠금 화면에 머무는 동안은 자동 동기화가 헛되이 요청을 보내지 않게 한다
+  if (!storedAuthKey()) {
+    if (!opts.silent) toast('먼저 암호를 넣어주세요.');
+    return false;
+  }
   if (!opts.force && syncBlockedByEditing()) {
     if (!opts.silent) toast('입력 중인 내용을 저장하거나 취소한 뒤 동기화해주세요.');
     return false;
@@ -584,6 +636,8 @@ function requestSheetWriteOnce(endpoint, action, payload) {
   url.searchParams.set('payload', JSON.stringify(sentPayload));
   url.searchParams.set('requestId', requestId);
   url.searchParams.set('callback', callback);
+  const authKey = storedAuthKey();          // 암호가 아니라 지문
+  if (authKey) url.searchParams.set('key', authKey);
   url.searchParams.set('_', Date.now());
   return new Promise((resolve, reject) => {
     const script = el('script');
@@ -615,6 +669,15 @@ function requestSheetWriteOnce(endpoint, action, payload) {
     }, 25000);
     window[callback] = response => {
       clear();
+      if (response && response.authRequired) {
+        // 암호가 없거나 틀렸다 — 저장 실패로 쌓아두지 않고 잠금 화면으로 되돌린다
+        const message = response.error || '암호가 필요합니다.';
+        finishAudit(false, message);
+        clearAuth();
+        if (typeof openAuthGate === 'function') openAuthGate(message);
+        reject(new Error(message));
+        return;
+      }
       if (!response || response.ok !== true) {
         const message = (response && response.error) || '시트 저장에 실패했습니다.';
         finishAudit(false, message);

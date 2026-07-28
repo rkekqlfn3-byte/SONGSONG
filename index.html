@@ -12,7 +12,7 @@
   파일을 고친 뒤에는 이 숫자를 올려야 사용자 화면에도 새 내용이 반영됩니다.
   (올리지 않으면 브라우저가 예전 파일을 계속 씁니다)
 -->
-<link rel="stylesheet" href="assets/styles.css?v=20260728-sched2">
+<link rel="stylesheet" href="assets/styles.css?v=20260728-auth3">
 </head>
 <body>
 
@@ -129,6 +129,11 @@
       <input type="text" id="webOperatorName" maxlength="40" placeholder="예: 송상현" autocomplete="name">
       <p>웹에서 기업·서류를 수정할 때 작업로그의 작업자로 기록됩니다. 이 브라우저에 한 번만 저장하면 됩니다.</p>
       <div class="sync-state" id="syncState" aria-live="polite"></div>
+      <div class="auth-section">
+        <div class="auth-who" id="authWho"></div>
+        <button class="btn" type="button" id="authLogout">이 브라우저에서 로그아웃</button>
+        <div class="account-manager" id="accountManager" hidden></div>
+      </div>
     </div>
     <div class="sync-actions">
       <button class="btn" id="syncDefault">기본 주소 사용</button>
@@ -364,16 +369,17 @@
 </div></div>
 <input type="file" id="filePick" accept=".xlsx,.csv" style="display:none">
 
-<script src="js/config.js?v=20260728-sched2"></script>
-<script src="js/data.js?v=20260728-sched2"></script>
-<script src="js/core.js?v=20260728-sched2"></script>
-<script src="js/searchable-select.js?v=20260728-sched2"></script>
-<script src="js/views.js?v=20260728-sched2"></script>
-<script src="js/documents.js?v=20260728-sched2"></script>
-<script src="js/mail.js?v=20260728-sched2"></script>
-<script src="js/sheet-api.js?v=20260728-sched2"></script>
-<script src="js/agency-branch.js?v=20260728-sched2"></script>
-<script src="js/company-form.js?v=20260728-sched2"></script>
-<script src="js/app.js?v=20260728-sched2"></script>
+<script src="js/config.js?v=20260728-auth3"></script>
+<script src="js/data.js?v=20260728-auth3"></script>
+<script src="js/core.js?v=20260728-auth3"></script>
+<script src="js/searchable-select.js?v=20260728-auth3"></script>
+<script src="js/views.js?v=20260728-auth3"></script>
+<script src="js/documents.js?v=20260728-auth3"></script>
+<script src="js/mail.js?v=20260728-auth3"></script>
+<script src="js/sheet-api.js?v=20260728-auth3"></script>
+<script src="js/agency-branch.js?v=20260728-auth3"></script>
+<script src="js/company-form.js?v=20260728-auth3"></script>
+<script src="js/auth-gate.js?v=20260728-auth3"></script>
+<script src="js/app.js?v=20260728-auth3"></script>
 </body>
 </html>
