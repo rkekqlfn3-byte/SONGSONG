@@ -618,6 +618,11 @@ function render() {
   liveSearch = null;                          // 새로 그리는 화면이 자기 것으로 다시 채운다
 
   renderTabs();
+  // 자료가 없으면 화면을 그릴 수 없다 — 로그아웃·연결 끊김 직후가 그렇다
+  if (!state.M || !state.M.companies) {
+    showDataPlaceholder('암호를 넣으면 자료를 불러옵니다.', '');
+    return;
+  }
   const f = { dash: viewDash, comp: viewCompanies, sched: viewSchedule, coach: viewCoaches, docs: viewDocs, mail: viewMail }[state.tab];
   VIEW.innerHTML = '';
   VIEW.appendChild(f());
@@ -674,7 +679,8 @@ function mineToggle() {
   return wrap;
 }
 function renderTabs() {
-  const n = state.M;
+  // 로그아웃 직후처럼 자료가 없는 순간에도 불릴 수 있다
+  const n = state.M || { companies: [], coaches: [] };
   const counts = { comp: n.companies.length, coach: n.coaches.length, docs: n.companies.length };
   $('#tabs').innerHTML = TABS.map(t =>
     `<button class="tab" role="tab" data-tab="${t.k}" aria-selected="${t.k === state.tab}">${t.t}` +

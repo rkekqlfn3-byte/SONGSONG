@@ -29,7 +29,7 @@
  *   ?action=syncStatuses&payload=...   1차 컨설팅일 기준 진행현황 자동 갱신
  */
 
-const VERSION = '2026-07-28-auth1';
+const VERSION = '2026-07-28-auth2';
 const API_CAPABILITIES = ['syncStatuses', 'auth'];
 
 /* ============================================================
@@ -387,6 +387,18 @@ function doGet(e) {
     }
 
     payload = JSON.parse((e.parameter && e.parameter.payload) || '{}');
+    /*
+     * 작업 기록의 «작업자»는 로그인한 계정으로 적는다.
+     * 웹에서 손으로 적는 «작업자 이름»은 아무 이름이나 넣을 수 있어
+     * 그대로 믿으면 누가 고쳤는지 기록이 어긋난다.
+     * 손으로 적은 이름이 계정과 다르면 괄호로 함께 남긴다.
+     */
+    if (account && payload && payload._audit) {
+      const typed = cleanText_(payload._audit.actor);
+      payload._audit.actor = (typed && typed !== account.name)
+        ? account.name + '(' + typed + ')'
+        : account.name;
+    }
     if (action === 'getData') {
       // 화면에 뿌릴 자료 읽기 — 시트를 잠가도 이 경로로는 읽힌다
       const data = readAllData_();
