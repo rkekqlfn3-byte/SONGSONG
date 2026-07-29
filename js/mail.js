@@ -26,6 +26,39 @@ function pickedDate(value) {
 const mailUses = (tpl, token) =>
   !!tpl && (String(tpl.subject || '') + String(tpl.body || '')).includes(`{{${token}}}`);
 
+/**
+ * 시트 칸에 붙여넣을 때 앞뒤로 딸려 들어온 따옴표를 떼어낸다.
+ * 그대로 두면 메일 첫 줄과 끝 줄에 «"» 가 찍혀 나간다.
+ */
+function trimQuotes(text) {
+  const t = String(text == null ? '' : text);
+  return (t.length > 1 && t[0] === '"' && t[t.length - 1] === '"') ? t.slice(1, -1) : t;
+}
+
+/** 한글·한자는 두 칸을 차지한다 — 글자 표의 세로줄을 맞추려면 이 폭으로 세야 한다 */
+const cellWidth = s => [...String(s)].reduce((n, ch) =>
+  n + (/[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹯＀-｠￠-￦]/.test(ch) ? 2 : 1), 0);
+const padCell = (s, w) => String(s) + ' '.repeat(Math.max(0, w - cellWidth(s)));
+
+/** 메일에 넣을 «글자 표». 메일 앱이 서식을 못 받아도 모양이 유지된다 */
+function textTable(head, rows) {
+  const widths = head.map((h, i) =>
+    Math.max(cellWidth(h), ...rows.map(r => cellWidth(r[i] || '')), 8) + 2);
+  const line = (l, m, r) => l + widths.map(w => '─'.repeat(w)).join(m) + r;
+  const row = cells => '│' + cells.map((c, i) => ' ' + padCell(c || '', widths[i] - 1)).join('│') + '│';
+  return [line('┌', '┬', '┐'), row(head), line('├', '┼', '┤'), ...rows.map(row), line('└', '┴', '┘')].join('\n');
+}
+
+/** 같은 표를 메일 앱이 알아듣는 서식으로 — 받는 사람이 칸에 바로 적을 수 있다 */
+function htmlTable(head, rows) {
+  const td = (v, isHead) => `<${isHead ? 'th' : 'td'} style="border:1px solid #999;padding:6px 12px;` +
+    `${isHead ? 'background:#f2f2f2;font-weight:bold;' : ''}min-width:120px;height:24px;">${esc(v || '')}</${isHead ? 'th' : 'td'}>`;
+  return `<table style="border-collapse:collapse;margin:8px 0;font-size:13px;">` +
+    `<tr>${head.map(h => td(h, true)).join('')}</tr>` +
+    rows.map(r => `<tr>${head.map((_, i) => td(r[i], false)).join('')}</tr>`).join('') +
+    `</table>`;
+}
+
 function viewMail() {
   const s = state.mail;
   const { companies, coaches, templates } = state.M;
@@ -143,15 +176,24 @@ function viewMail() {
     const deadlineText = deadlineDate ? korDate(deadlineDate) : '';
     const names = picked.map(x => x.name);
 
-    const fill = t => String(t || '')
+    // 「기업명 / HRD4U 아이디」 표 — 아이디 칸은 받는 사람이 채우도록 비워 둔다
+    const idHead = ['기업명', 'HRD4U 아이디'];
+    const idRows = names.map(n => [n, '']);
+
+    const fill = t => trimQuotes(t)
       .replace(/\{\{기업명\}\}/g, toCoach ? names.join(', ') : c.name)
       .replace(/\{\{기업수\}\}/g, String(names.length))
       .replace(/\{\{기업목록\}\}/g, names.join(', '))
       .replace(/\{\{기업목록줄\}\}/g, names.map(n => ` - ${n}`).join('\n'))
       .replace(/\{\{기한\}\}/g, deadlineText || '(기한 미정)')
       .replace(/\{\{일정\}\}/g, schedText || '(일정 미정)');
-    const subject = fill(tpl.subject).replace(/¶/g, ' ').trim();
-    const body = fill(String(tpl.body || '').replace(/¶/g, '\n'));
+    const subject = fill(tpl.subject).replace(/¶/g, ' ').replace(/\s*\n\s*/g, ' ').trim();
+    const bodyRaw = fill(String(tpl.body || '').replace(/¶/g, '\n'));
+    // 글자로 된 표 (그냥 복사할 때) 와 서식 있는 표 (서식 복사할 때) 를 따로 만든다
+    const body = bodyRaw.replace(/\{\{HRD4U표\}\}/g, textTable(idHead, idRows));
+    const bodyHtml = bodyRaw.split('{{HRD4U표}}')
+      .map(part => esc(part).replace(/\n/g, '<br>'))
+      .join(htmlTable(idHead, idRows));
 
     const problems = [];
     if (!to) problems.push(`${toCoach ? '코치' : '기업 담당자'}의 이메일 주소가 비어 있습니다.`);
@@ -168,10 +210,16 @@ function viewMail() {
       (problems.length ? `<div class="note bad" style="margin-bottom:12px"><b>확인 필요</b><br>${problems.map(esc).join('<br>')}</div>` : '') +
       block('받는 사람', to ? `${toName ? toName + ' <' + to + '>' : to}` : '', 'mono') +
       block('메일 제목', subject) +
-      block('메일 본문', body, 'body') +
+      `<div class="out"><div class="out-head"><label>메일 본문</label><div class="spacer"></div>
+        <button class="btn" id="copyBodyRich">서식 그대로 복사</button>
+        <button class="btn" id="copyBodyText">글자만 복사</button></div>
+        <div class="box body mail-body-html">${bodyHtml}</div></div>` +
       (tpl.attach && tpl.attach !== '없음'
         ? `<div class="note warn"><b>첨부 / 서류</b><br>${esc(tpl.attach).replace(/¶/g, '<br>')}</div>`
         : '<div class="note"><span class="dim">첨부 서류 없음</span></div>'));
+
+    out.querySelector('#copyBodyText').onclick = () => copy(body, '본문');
+    out.querySelector('#copyBodyRich').onclick = () => copyRich(bodyHtml, body, '본문(서식 포함)');
 
     const acts = el('div', 'toolbar'); acts.style.marginTop = '12px';
     const bAll = el('button', 'btn', '제목+본문 한번에 복사');

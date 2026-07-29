@@ -129,6 +129,23 @@ function toastUndo(msg, onUndo) {
   clearTimeout(toast._t);
   toast._t = setTimeout(() => t.classList.remove('show'), 5200);
 }
+/**
+ * 표·굵은 글씨 같은 «서식을 살려» 복사한다.
+ * 아웃룩·지메일에 붙여넣으면 표가 진짜 표로 들어간다.
+ * 브라우저가 막으면 글자만이라도 복사되게 물러선다.
+ */
+async function copyRich(html, plainText, label) {
+  try {
+    await navigator.clipboard.write([new ClipboardItem({
+      'text/html': new Blob([html], { type: 'text/html' }),
+      'text/plain': new Blob([plainText], { type: 'text/plain' }),
+    })]);
+    toast(`${label} 복사됨`);
+  } catch {
+    copy(plainText, label);
+  }
+}
+
 async function copy(text, label) {
   try { await navigator.clipboard.writeText(text); toast(`${label} 복사됨`); }
   catch { // file:// 등 clipboard API가 막힌 환경 대비
