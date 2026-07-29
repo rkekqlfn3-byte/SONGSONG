@@ -84,6 +84,8 @@
     setBaseYear(picked);
     updateCoachContact();
     syncTeamEnd();
+    // 메일의 기한 날짜도 기준 연도를 따르므로 보고 있던 화면을 다시 그린다
+    if (state.M && state.tab === 'mail') render();
     if (typeof addLog === 'function') addLog('SETTING', '기준 연도', `${picked}년으로 변경`, 'info');
     toast(`기준 연도 ${picked}년`);
   };

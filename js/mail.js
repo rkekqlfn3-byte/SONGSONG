@@ -128,10 +128,22 @@ function viewMail() {
   /* --- 날짜 (본문에서 쓰는 것만 칸이 생긴다) --- */
   const needDeadline = mailUses(tpl, '기한');
   const needSchedule = mailUses(tpl, '일정');
+  /*
+   * 날짜는 화면 위 «기준 연도» 안에서만 고른다.
+   * 서류 칸이 월/일만 적으면 기준 연도를 붙이는 것과 같은 규칙이라,
+   * 메일만 다른 해가 찍히는 일이 없다.
+   */
+  const baseYear = getBaseYear();
   const dateField = (label, hint, value, on) => {
     const f = el('div', 'field');
-    f.innerHTML = `<label>${esc(label)} <span class="dim">${esc(hint)}</span></label>`;
-    const di = el('input'); di.type = 'date'; di.value = value || '';
+    f.innerHTML = `<label>${esc(label)} <span class="dim">${esc(hint)} · ${baseYear}년</span></label>`;
+    const di = el('input');
+    di.type = 'date';
+    di.min = `${baseYear}-01-01`;
+    di.max = `${baseYear}-12-31`;
+    // 기준 연도를 바꾸면 지난해 날짜가 남지 않게 비운다
+    di.value = (value && value.slice(0, 4) === String(baseYear)) ? value : '';
+    if (di.value !== value) on(di.value);
     di.onchange = () => { on(di.value); render(); };
     f.appendChild(di);
     left.appendChild(f);
