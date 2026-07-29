@@ -1037,7 +1037,14 @@ function openCompany(c, docsEditMode) {
           <div class="next-box is-done"><div class="next-doc-name">서류 15종이 모두 채워졌습니다.</div></div>
         </div>`;
 
-  openDrawer(esc(c.name), `${badge(c.status)} <span class="dim">담당 ${esc(c.owner || '미배정')}</span>`, `
+  // 진행현황을 상세창에서 바로 바꾼다 — 수정창을 열지 않아도 되게
+  const statusPicker =
+    `<label class="drawer-status">` +
+    `<select id="drawerStatus" data-searchable="off" aria-label="${esc(c.name)} 진행현황">` +
+    STATUS.map(x => `<option value="${esc(x.k)}"${x.k === c.status ? ' selected' : ''}>${esc(x.k)}</option>`).join('') +
+    `</select><span class="drawer-status-state" id="drawerStatusState"></span></label>`;
+
+  openDrawer(esc(c.name), `${statusPicker} <span class="dim">담당 ${esc(c.owner || '미배정')}</span>`, `
     ${nextHtml}
     <div class="sect memo-sect">
       <div class="sect-head"><h4>메모</h4><button type="button" class="memo-edit-button" id="editCompanyMemo">${c.memo ? '수정' : '메모 추가'}</button></div>
@@ -1081,6 +1088,38 @@ function openCompany(c, docsEditMode) {
     </div>
     <div class="sect"><button class="btn primary" id="drawerDocsAction" style="width:100%">${docsEditMode ? '전체 저장' : '서류 수정'}</button></div>
   `, d => {
+    const statusBox = $('#drawerStatus', d);
+    const statusState = $('#drawerStatusState', d);
+    // 색은 목록의 진행현황 표시와 같은 규칙을 따른다
+    const paintStatus = () => {
+      const meta = statusMeta(statusBox.value);
+      statusBox.style.color = meta.v ? `var(${meta.v})` : '';
+    };
+    paintStatus();
+    statusBox.onchange = async () => {
+      const next = statusBox.value;
+      const before = c.status;
+      if (next === before) return;
+      statusBox.disabled = true;
+      statusState.textContent = '저장 중…';
+      statusState.className = 'drawer-status-state';
+      try {
+        await saveCompanyStatus(c, next);
+        paintStatus();
+        statusState.textContent = '저장됨';
+        statusState.className = 'drawer-status-state ok';
+        render();                                  // 목록·대시보드 숫자도 같이 맞춘다
+        setTimeout(() => { if (statusState.isConnected) statusState.textContent = ''; }, 2000);
+      } catch (error) {
+        statusBox.value = before;                  // 시트에 못 썼으면 화면도 되돌린다
+        paintStatus();
+        statusState.textContent = error.message || '저장하지 못했습니다';
+        statusState.className = 'drawer-status-state bad';
+      } finally {
+        statusBox.disabled = false;
+      }
+    };
+
     const gotoNext = $('#gotoNextDoc', d);
     if (gotoNext && nextDef) {
       gotoNext.onclick = () => go('comp', {

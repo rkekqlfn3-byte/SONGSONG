@@ -569,6 +569,55 @@ function consultationUpdateFor(company, changes) {
  * 행을 지우지 않으므로 기록은 남고, 진행 중 집계·마감 관리에서는 빠진다.
  * 되돌리려면 수정 창에서 진행현황만 다시 바꾸면 된다.
  */
+/**
+ * 진행현황만 바꿔 저장한다.
+ *
+ * 시트에 쓸 때는 기업 한 줄을 통째로 다시 쓰므로, 나머지 값은 «지금 화면에 있는
+ * 그대로» 같이 보내야 한다. 빼먹으면 그 칸이 빈 값으로 덮인다.
+ * 일정 열은 scheduleChanged:false 로 건드리지 않는다.
+ */
+function companyStatusPayload(company, status, audit) {
+  const w = company.workplace || {};
+  return {
+    originalCompanyName: company.name,
+    companyName: company.name,
+    status,
+    owner: company.owner || '',
+    contactName: company.contact.name || '',
+    contactTitle: company.contact.title || '',
+    contactPhone: company.contact.phone || '',
+    contactEmail: company.contact.email || '',
+    employeeCount: w.employeeCount || '',
+    workplaceNumber: w.managementNumber || '',
+    companyAddress: w.address || '',
+    agencyBranch: w.agencyBranch || '',
+    hrd4uId: w.hrd4uId || '',
+    startDate: company.start ? iso(company.start) : '',
+    endDate: company.end ? iso(company.end) : '',
+    coachName: company.coachName || '',
+    coachEmail: company.coachEmail || '',
+    coachPhone: company.coachPhone || '',
+    scheduleChanged: false,
+    _audit: audit,
+  };
+}
+
+/** 상세창에서 진행현황만 바꿀 때 */
+async function saveCompanyStatus(company, status) {
+  const before = company.status;
+  if (!status || status === before) return false;
+  await requestSheetWrite(writeEndpoint(), 'updateCompany', companyStatusPayload(company, status, {
+    type: 'EDIT',
+    target: company.name,
+    detail: `진행현황 ${before} → ${status}`,
+    tone: status === '신청취소' ? 'warn' : 'info',
+    before: { status: before },
+    after: { status },
+  }));
+  company.status = status;
+  return true;
+}
+
 async function cancelCompany(company) {
   if (!company) return false;
   if (company.status === '신청취소') { toast(`${company.name} — 이미 신청취소 상태입니다.`); return false; }
