@@ -11,17 +11,6 @@
 const MAIL_STAGES = ['신청단계', '확정단계', '실시단계', '지급단계'];
 const MAIL_TARGETS = ['기업 담당자', '훈련코치'];
 
-/**
- * 날짜는 규칙으로 계산하지 않고 사람이 직접 고른다.
- * 「시작일+28일」 같은 규칙을 두면 예외가 생길 때마다 손댈 수 없어서,
- * 메일마다 달력에서 고르는 쪽이 실제 운영에 맞는다.
- */
-function pickedDate(value) {
-  if (!value) return null;
-  const d = new Date(value + 'T00:00:00');
-  return isNaN(d.getTime()) ? null : d;
-}
-
 /** 제목·본문에 그 자리가 쓰였는지 */
 const mailUses = (tpl, token) =>
   !!tpl && (String(tpl.subject || '') + String(tpl.body || '')).includes(`{{${token}}}`);
@@ -129,30 +118,39 @@ function viewMail() {
   const needDeadline = mailUses(tpl, '기한');
   const needSchedule = mailUses(tpl, '일정');
   /*
-   * 날짜는 화면 위 «기준 연도» 안에서만 고른다.
-   * 서류 칸이 월/일만 적으면 기준 연도를 붙이는 것과 같은 규칙이라,
-   * 메일만 다른 해가 찍히는 일이 없다.
+   * 날짜는 서류 칸과 똑같이 «월/일»만 적는다. 연도는 화면 위 기준 연도가 붙는다.
+   * 연도를 손으로 만질 일이 없으니 메일만 다른 해가 찍히는 일도 없다.
    */
   const baseYear = getBaseYear();
   const dateField = (label, hint, value, on) => {
     const f = el('div', 'field');
-    f.innerHTML = `<label>${esc(label)} <span class="dim">${esc(hint)} · ${baseYear}년</span></label>`;
+    f.innerHTML = `<label>${esc(label)} <span class="dim">${esc(hint)}</span></label>`;
+    const box = el('div', 'mail-date');
     const di = el('input');
-    di.type = 'date';
-    di.min = `${baseYear}-01-01`;
-    di.max = `${baseYear}-12-31`;
-    // 기준 연도를 바꾸면 지난해 날짜가 남지 않게 비운다
-    di.value = (value && value.slice(0, 4) === String(baseYear)) ? value : '';
-    if (di.value !== value) on(di.value);
-    di.onchange = () => { on(di.value); render(); };
-    f.appendChild(di);
+    di.type = 'text';
+    di.inputMode = 'numeric';
+    di.placeholder = '예: 8/17';
+    di.autocomplete = 'off';
+    di.maxLength = 5;
+    di.value = value || '';
+    const shown = el('span', 'mail-date-shown');
+    const paint = () => {
+      const d = monthDayToDate(di.value, baseYear);
+      shown.textContent = d ? korDate(d) : (di.value.trim() ? '월/일 형식으로 적어주세요' : `${baseYear}년`);
+      shown.classList.toggle('bad', !!di.value.trim() && !d);
+    };
+    paint();
+    di.oninput = paint;                       // 적는 동안 바로 보여준다
+    di.onchange = () => { on(di.value.trim()); render(); };
+    box.append(di, shown);
+    f.appendChild(box);
     left.appendChild(f);
   };
-  if (needDeadline) dateField('제출 기한', '본문의 «기한» 자리', s.deadline, v => { s.deadline = v; });
-  if (needSchedule) dateField(tpl.schedName || '일정', '본문의 «일정» 자리', s.manual, v => { s.manual = v; });
+  if (needDeadline) dateField('제출 기한', '월/일만 적으면 됩니다', s.deadline, v => { s.deadline = v; });
+  if (needSchedule) dateField(tpl.schedName || '일정', '월/일만 적으면 됩니다', s.manual, v => { s.manual = v; });
 
-  const deadlineDate = pickedDate(s.deadline);
-  const scheduleDate = pickedDate(s.manual);
+  const deadlineDate = monthDayToDate(s.deadline, baseYear);
+  const scheduleDate = monthDayToDate(s.manual, baseYear);
 
   /* --- 조건 요약 --- */
   const info = el('div', 'field');
